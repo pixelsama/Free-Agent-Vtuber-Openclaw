@@ -2,6 +2,7 @@
 
 ![Project Status](https://img.shields.io/badge/status-in%20development-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pixelsama/Free-Agent-Vtuber)
 
 一个基于事件驱动架构、可灵活扩展的 AI 虚拟主播项目。
 
