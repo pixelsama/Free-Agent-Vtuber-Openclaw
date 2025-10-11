@@ -17,11 +17,22 @@ from .audio import AudioBundle, AudioIngestor, AudioPreprocessor, IngestLimits
 from .asr import AsrOptions, AsrService
 from .tts_streamer import stream_text as tts_stream_text
 from .ltm_outbox import add_event as outbox_add_event, start_flush_task as outbox_start_flush
+from .internal_state_store import InternalStateStore
 
 
 app = FastAPI()
-chat_service = ChatService()
 logger = logging.getLogger(__name__)
+
+# Initialize internal state store
+try:
+    import os
+    db_path = os.getenv("INTERNAL_STATE_DB_PATH", "internal_states.db")
+    state_store = InternalStateStore(db_path=db_path)
+except Exception as exc:
+    logger.exception("Failed to initialize InternalStateStore", extra={"error": repr(exc)})
+    state_store = None
+
+chat_service = ChatService(state_store=state_store)
 SYNC_TTS_STREAMING = os.getenv("SYNC_TTS_STREAMING", "false").lower() in {"1", "true", "yes", "on"}
 ENABLE_ASYNC_EXT = os.getenv("ENABLE_ASYNC_EXT", "false").lower() in {"1", "true", "yes", "on"}
 VISION_MAX_BYTES = int(os.getenv("VISION_MAX_BYTES", 4 * 1024 * 1024))
@@ -192,6 +203,12 @@ async def chat_stream(request: Request) -> StreamingResponse:
                 return
 
         stats = {"ttft_ms": round(ttft_ms or 0.0, 1), "tokens": chat_service.last_token_count}
+
+        # Include internal states in the done event
+        internal_states = await chat_service.get_internal_states(session_id)
+        if internal_states:
+            stats["internal_states"] = internal_states
+
         yield _sse_format("done", {"stats": stats})
 
         # Emit async events via outbox
@@ -417,6 +434,11 @@ async def chat_audio_stream(request: Request) -> StreamingResponse:
             "reply": reply_text,
             "stats": stats,
         }
+
+        # Include internal states in the done event
+        internal_states = await chat_service.get_internal_states(session_id)
+        if internal_states:
+            stats["internal_states"] = internal_states
 
         yield _sse_format("done", done_payload)
 
