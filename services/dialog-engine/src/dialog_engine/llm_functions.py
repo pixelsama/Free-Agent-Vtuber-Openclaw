@@ -87,6 +87,13 @@ async def handle_tool_call(tool_call: Dict[str, Any], session_id: str, state_sto
                     "error": f"Invalid value: {value} must be numeric"
                 }
 
+            # Add boundary check for state values (0-100 range)
+            if not 0 <= value <= 100:
+                return {
+                    "success": False,
+                    "error": f"Value {value} out of valid range (0-100). State values should be between 0 and 100."
+                }
+
             # Update the state
             await state_store.update_state(session_id, state_key, value)
 

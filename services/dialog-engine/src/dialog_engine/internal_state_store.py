@@ -6,6 +6,7 @@ import asyncio
 import os
 import sqlite3
 import time
+from contextlib import contextmanager
 from typing import Dict, Optional
 
 import logging
@@ -20,40 +21,57 @@ class InternalStateStore:
         self._db_path = db_path
         self._ensure_table_exists()
 
+    @contextmanager
+    def _get_connection(self, row_factory: bool = False):
+        """Context manager for database connections to ensure proper cleanup."""
+        if not self._db_path:
+            raise RuntimeError("Database path not configured")
+
+        try:
+            conn = sqlite3.connect(self._db_path)
+            if row_factory:
+                conn.row_factory = sqlite3.Row
+            yield conn
+        except Exception as exc:
+            logger.debug("internal_states.connect.error", exc_info=True)
+            raise RuntimeError("failed to open internal_states database") from exc
+        finally:
+            if 'conn' in locals():
+                conn.close()
+
     def _ensure_table_exists(self) -> None:
         """Create the internal_states table if it doesn't exist."""
         if not self._db_path:
             return
 
         os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
-        conn = sqlite3.connect(self._db_path)
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS internal_states (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    state_key TEXT NOT NULL,
-                    state_value REAL NOT NULL,
-                    updated_at INTEGER NOT NULL,
-                    UNIQUE(session_id, state_key)
+
+        with self._get_connection() as conn:
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS internal_states (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL,
+                        state_key TEXT NOT NULL,
+                        state_value REAL NOT NULL,
+                        updated_at INTEGER NOT NULL,
+                        UNIQUE(session_id, state_key)
+                    )
+                    """,
                 )
-                """,
-            )
-            # Create index for efficient queries
-            cur.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_internal_states_session_key
-                ON internal_states(session_id, state_key)
-                """,
-            )
-            conn.commit()
-        except Exception as exc:
-            logger.error("Failed to create internal_states table", exc_info=True)
-            raise RuntimeError("failed to create internal_states table") from exc
-        finally:
-            conn.close()
+                # Create index for efficient queries
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_internal_states_session_key
+                    ON internal_states(session_id, state_key)
+                    """,
+                )
+                conn.commit()
+            except Exception as exc:
+                logger.error("Failed to create internal_states table", exc_info=True)
+                raise RuntimeError("failed to create internal_states table") from exc
 
     async def get_state(self, session_id: str, state_key: str) -> Optional[float]:
         """Get a specific state value for a session."""
@@ -62,27 +80,19 @@ class InternalStateStore:
 
         def _query() -> Optional[float]:
             try:
-                conn = sqlite3.connect(self._db_path)
-                conn.row_factory = sqlite3.Row
-            except Exception as exc:
-                logger.debug("internal_states.connect.error", exc_info=True)
-                raise RuntimeError("failed to open internal_states database") from exc
-
-            try:
-                row = conn.execute(
-                    """
-                    SELECT state_value
-                    FROM internal_states
-                    WHERE session_id = ? AND state_key = ?
-                    """,
-                    (session_id, state_key),
-                ).fetchone()
-                return float(row["state_value"]) if row else None
+                with self._get_connection(row_factory=True) as conn:
+                    row = conn.execute(
+                        """
+                        SELECT state_value
+                        FROM internal_states
+                        WHERE session_id = ? AND state_key = ?
+                        """,
+                        (session_id, state_key),
+                    ).fetchone()
+                    return float(row["state_value"]) if row else None
             except Exception as exc:
                 logger.debug("internal_states.query.error", exc_info=True)
                 raise RuntimeError("failed to query internal_states database") from exc
-            finally:
-                conn.close()
 
         try:
             return await asyncio.to_thread(_query)
@@ -96,37 +106,35 @@ class InternalStateStore:
 
         def _upsert() -> None:
             os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
-            conn = sqlite3.connect(self._db_path)
             try:
-                cur = conn.cursor()
-                # Ensure table exists (defensive)
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS internal_states (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT NOT NULL,
-                        state_key TEXT NOT NULL,
-                        state_value REAL NOT NULL,
-                        updated_at INTEGER NOT NULL,
-                        UNIQUE(session_id, state_key)
+                with self._get_connection() as conn:
+                    cur = conn.cursor()
+                    # Ensure table exists (defensive)
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS internal_states (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            state_key TEXT NOT NULL,
+                            state_value REAL NOT NULL,
+                            updated_at INTEGER NOT NULL,
+                            UNIQUE(session_id, state_key)
+                        )
+                        """,
                     )
-                    """,
-                )
 
-                # Insert or replace the state value
-                cur.execute(
-                    """
-                    INSERT OR REPLACE INTO internal_states(session_id, state_key, state_value, updated_at)
-                    VALUES(?, ?, ?, ?)
-                    """,
-                    (session_id, state_key, float(new_value), int(time.time())),
-                )
-                conn.commit()
+                    # Insert or replace the state value
+                    cur.execute(
+                        """
+                        INSERT OR REPLACE INTO internal_states(session_id, state_key, state_value, updated_at)
+                        VALUES(?, ?, ?, ?)
+                        """,
+                        (session_id, state_key, float(new_value), int(time.time())),
+                    )
+                    conn.commit()
             except Exception as exc:
                 logger.error("Failed to update internal state", exc_info=True)
                 raise RuntimeError("failed to update internal state") from exc
-            finally:
-                conn.close()
 
         try:
             await asyncio.to_thread(_upsert)
@@ -140,28 +148,20 @@ class InternalStateStore:
 
         def _query() -> Dict[str, float]:
             try:
-                conn = sqlite3.connect(self._db_path)
-                conn.row_factory = sqlite3.Row
-            except Exception as exc:
-                logger.debug("internal_states.connect.error", exc_info=True)
-                raise RuntimeError("failed to open internal_states database") from exc
+                with self._get_connection(row_factory=True) as conn:
+                    rows = conn.execute(
+                        """
+                        SELECT state_key, state_value
+                        FROM internal_states
+                        WHERE session_id = ?
+                        """,
+                        (session_id,),
+                    ).fetchall()
 
-            try:
-                rows = conn.execute(
-                    """
-                    SELECT state_key, state_value
-                    FROM internal_states
-                    WHERE session_id = ?
-                    """,
-                    (session_id,),
-                ).fetchall()
-
-                return {row["state_key"]: float(row["state_value"]) for row in rows}
+                    return {row["state_key"]: float(row["state_value"]) for row in rows}
             except Exception as exc:
                 logger.debug("internal_states.query.error", exc_info=True)
                 raise RuntimeError("failed to query internal_states database") from exc
-            finally:
-                conn.close()
 
         try:
             return await asyncio.to_thread(_query)
@@ -174,23 +174,21 @@ class InternalStateStore:
             return False
 
         def _delete() -> bool:
-            conn = sqlite3.connect(self._db_path)
             try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    DELETE FROM internal_states
-                    WHERE session_id = ? AND state_key = ?
-                    """,
-                    (session_id, state_key),
-                )
-                conn.commit()
-                return cur.rowcount > 0
+                with self._get_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        DELETE FROM internal_states
+                        WHERE session_id = ? AND state_key = ?
+                        """,
+                        (session_id, state_key),
+                    )
+                    conn.commit()
+                    return cur.rowcount > 0
             except Exception as exc:
                 logger.error("Failed to delete internal state", exc_info=True)
                 raise RuntimeError("failed to delete internal state") from exc
-            finally:
-                conn.close()
 
         try:
             return await asyncio.to_thread(_delete)
@@ -203,23 +201,21 @@ class InternalStateStore:
             return 0
 
         def _clear() -> int:
-            conn = sqlite3.connect(self._db_path)
             try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    DELETE FROM internal_states
-                    WHERE session_id = ?
-                    """,
-                    (session_id,),
-                )
-                conn.commit()
-                return cur.rowcount
+                with self._get_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        DELETE FROM internal_states
+                        WHERE session_id = ?
+                        """,
+                        (session_id,),
+                    )
+                    conn.commit()
+                    return cur.rowcount
             except Exception as exc:
                 logger.error("Failed to clear session states", exc_info=True)
                 raise RuntimeError("failed to clear session states") from exc
-            finally:
-                conn.close()
 
         try:
             return await asyncio.to_thread(_clear)
