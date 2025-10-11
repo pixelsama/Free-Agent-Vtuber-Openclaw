@@ -11,6 +11,7 @@ from dialog_engine.settings import (
     AsrSettings,
     LLMSettings,
     LTMInlineSettings,
+    PromptSettings,
     OpenAISettings,
     Settings,
     ShortTermMemorySettings,
@@ -23,6 +24,7 @@ def _make_settings(
     stm_enabled: bool = False,
     ltm_enabled: bool = False,
     base_url: Optional[str] = None,
+    system_prompt: str = "你是一位后端定义的虚拟主播助手。",
 ) -> Settings:
     return Settings(
         openai=OpenAISettings(api_key=None, organization=None, base_url=None),
@@ -38,6 +40,7 @@ def _make_settings(
             retry_limit=0,
             retry_backoff_seconds=0.0,
         ),
+        prompts=PromptSettings(system_prompt=system_prompt),
         short_term=ShortTermMemorySettings(
             enabled=stm_enabled,
             db_path=":memory:",
@@ -238,6 +241,28 @@ async def test_stream_reply_llm_includes_ltm_snippets():
     sent_messages = stub_llm.calls[0]
     system_blocks = [m for m in sent_messages if m["role"] == "system"]
     assert any("Relevant memories" in m["content"] for m in system_blocks)
+
+
+@pytest.mark.asyncio
+async def test_stream_reply_llm_uses_backend_system_prompt():
+    backend_prompt = "后端维护的系统提示词。"
+    stub_llm = _StubLLMClient(["Hi"])
+    service = ChatService(
+        settings=_make_settings(enabled=True, system_prompt=backend_prompt),
+        llm_client_factory=lambda: stub_llm,
+    )
+
+    async for _ in service.stream_reply(
+        "sess-system",
+        "hello",
+        meta={"system_prompt": "前端尝试覆盖"},
+    ):
+        pass
+
+    sent_messages = stub_llm.calls[0]
+    assert sent_messages[0]["role"] == "system"
+    assert sent_messages[0]["content"] == backend_prompt
+    assert all(msg.get("content") != "前端尝试覆盖" for msg in sent_messages if isinstance(msg, dict))
 
 
 @pytest.mark.asyncio

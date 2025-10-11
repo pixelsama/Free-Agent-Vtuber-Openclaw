@@ -32,6 +32,11 @@ class ChatService:
         self._memory_store = memory_store
         self._ltm_client = ltm_client
         self._state_store = state_store
+        prompt = getattr(self._settings, "prompts", None)
+        if prompt and getattr(prompt, "system_prompt", None):
+            self._system_prompt = prompt.system_prompt.strip()
+        else:
+            self._system_prompt = ""
 
         self.last_token_count: int = 0
         self.last_ttft_ms: Optional[float] = None
@@ -287,10 +292,16 @@ class ChatService:
         context: List[MemoryTurn],
         ltm_snippets: List[str],
     ) -> list[Dict[str, str]]:
-        system_prompt = meta.get("system_prompt")
         messages: list[Dict[str, str]] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": str(system_prompt)})
+        if "system_prompt" in meta and meta["system_prompt"] != self._system_prompt:
+            from logging import getLogger
+
+            getLogger(__name__).info(
+                "chat.system_prompt.meta_override_ignored",
+                extra={"sessionId": meta.get("session_id"), "override_length": len(str(meta["system_prompt"]))},
+            )
+        if self._system_prompt:
+            messages.append({"role": "system", "content": self._system_prompt})
 
         # Inject internal states as context if available
         if self._state_store:
