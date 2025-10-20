@@ -14,6 +14,9 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
+from input_handlers.bilibili_live import BilibiliDanmakuClient, BilibiliDanmakuConfig
+from publisher import RedisLiveEventPublisher
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +27,7 @@ logger = logging.getLogger(__name__)
 # 全局变量
 redis_client: Optional[redis.Redis] = None
 active_connections: Dict[str, WebSocket] = {}
+bilibili_client: Optional[BilibiliDanmakuClient] = None
 
 DIALOG_ENGINE_URL = os.getenv("DIALOG_ENGINE_URL", "http://localhost:8100")
 TEXT_STREAM_ENDPOINT = "/chat/stream"
@@ -52,13 +56,44 @@ async def cleanup_redis():
         await redis_client.close()
     logger.info("Input Handler shutdown")
 
+def _is_enabled(name: str) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+async def _start_bilibili_client() -> None:
+    global bilibili_client
+    if not _is_enabled("ENABLE_BILIBILI"):
+        return
+    config = BilibiliDanmakuConfig.from_env()
+    if config.room_id <= 0:
+        logger.warning("ENABLE_BILIBILI set but BILI_ROOM_ID missing; skipping client start")
+        return
+    publisher = RedisLiveEventPublisher(redis_client)
+    client = BilibiliDanmakuClient(config, publisher)
+    try:
+        await client.start()
+        bilibili_client = client
+        logger.info("Bilibili danmaku client started")
+    except Exception as exc:
+        logger.error("Failed to start Bilibili client: %s", exc, exc_info=True)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global bilibili_client
     # 启动时执行
     await init_redis()
+    await _start_bilibili_client()
     logger.info("Input Handler started - ready to receive user inputs")
     yield
     # 关闭时执行
+    if bilibili_client:
+        try:
+            await bilibili_client.stop()
+        except Exception as exc:  # pragma: no cover - shutdown guard
+            logger.warning("Failed to stop Bilibili client cleanly: %s", exc)
+    bilibili_client = None
     await cleanup_redis()
 
 app = FastAPI(lifespan=lifespan)

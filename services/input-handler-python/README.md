@@ -10,6 +10,7 @@
 - **Redis集成**: 通过Redis事件总线发送任务到AI处理模块
 - **任务管理**: 自动生成task_id，跟踪处理状态
 - **错误处理**: 完善的错误处理和日志记录
+- **Bilibili 集成（可选）**: 在 `ENABLE_BILIBILI` 开启后采集 Bilibili 醒目留言并推送到 Redis `live.chat` 频道
 
 ## 接口端点
 
