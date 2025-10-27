@@ -118,6 +118,7 @@ services:
       - LIVE_CHAT_CHANNEL=${LIVE_CHAT_CHANNEL:-live.chat}
       - BILI_CALLBACK_SECRET=${BILI_CALLBACK_SECRET}
       - BILI_CALLBACK_KEY=${BILI_CALLBACK_KEY:-${BILI_APP_KEY}}
+      - PYTHONPATH=/app
     depends_on:
       redis:
         condition: service_healthy
