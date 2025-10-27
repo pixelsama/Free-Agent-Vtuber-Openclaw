@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Callable, Dict, List
 
 import httpx
@@ -103,7 +104,8 @@ def test_sse_proxy_success(monkeypatch, client: TestClient, endpoint: str, expec
     assert captured["url"] == f"{main.DIALOG_ENGINE_URL.rstrip('/')}{expected_path}"
     assert captured["headers"]["x-test"] == "1"
     assert captured["headers"]["content-type"] == "application/json"
-    assert captured["content"] == b'{"sessionId":"sess"}'
+    parsed_body = json.loads(captured["content"].decode("utf-8"))
+    assert parsed_body == {"sessionId": "sess"}
 
     client_instance = created_clients[0]
     assert client_instance.closed is True
