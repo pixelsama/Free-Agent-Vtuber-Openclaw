@@ -16,7 +16,7 @@
 
 **数据流：** `useApi.js` 负责通过 WebSocket 与后端通信，`receivedText` 存储 AI 返回的文本。`ChatInterface.vue` 通过 `watch` 监听 `receivedText` 并将整个字符串添加到消息列表。没有逐字符流式处理逻辑。
 
-**后端流式输出支持：** 后端 `dialog‑engine` 提供基于 FastAPI `StreamingResponse` 的流式接口 `/chat/stream` 和 `/chat/audio/stream`。`stream_reply` 会分多次产生回复片段，SSE 每次发送事件 `text‑delta`，包含 `{"content": delta, "eos": False}`，客户端可在收到每个片段时实时处理。最终以 `done` 事件结束，携带统计信息。目前 `input‑handler` 调用该接口并累积所有 `text‑delta` 片段再返回完整字符串；`output‑handler` 只向前端推送最终文本，因此现有前端看不到流式片段。要实现原生字幕流式显示，需要在前端绕过中间层，直接连接 SSE 或调整中间层逻辑以转发 `text‑delta` 事件。
+**后端流式输出支持：** 后端 `dialog‑engine` 提供基于 FastAPI `StreamingResponse` 的流式接口 `/chat/stream` 和 `/chat/audio/stream`。`stream_reply` 会分多次产生回复片段，SSE 每次发送事件 `text‑delta`，包含 `{"content": delta, "eos": False}`，客户端可在收到每个片段时实时处理。最终以 `done` 事件结束，携带统计信息。现在 API Gateway 已经在自身域下代理了这两个接口（`POST /chat/stream`、`POST /chat/audio/stream`），前端可以在同源下直接请求，无需再手动绕过中间层或与 `dialog‑engine` 域通信。`input‑handler` 仍然可以使用完整文本接口，而前端字幕则基于 Gateway 暴露的流式端点实时获取片段。
 
 **Live2D 模型：** `Live2DViewer.vue` 提供 `playAudioWithLipSync` 方法，将文本语音与模型口型匹配播放；`App.vue` 在 `watch(receivedAudioUrl)` 时调用该方法。该部分可以保留。
 
@@ -138,7 +138,7 @@ watch(() => props.text, (newVal) => {
   }
   ```
 
-- **组合函数 `useStreamingChat`：** 内部使用 `EventSource` 或 `fetch` + `ReadableStream` 连接 `dialog‑engine` 的 `/chat/stream`，解析 `text‑delta` 和 `done` 事件，并暴露注册回调的方法。这样前端就可以直接利用后端原生流式输出。
+- **组合函数 `useStreamingChat`：** 内部使用 `EventSource` 或 `fetch` + `ReadableStream` 连接 Gateway 暴露的 `/chat/stream`（必要时切换到 `/chat/audio/stream`），解析 `text‑delta` 和 `done` 事件，并暴露注册回调的方法。这样前端就可以直接利用后端原生流式输出，同时保持与 Gateway 的同源部署。
 
 - **布局中添加字幕组件：** 在模板中添加 `<SubtitleBar :text="subtitleText" />`，并在发送消息按钮或其他触发点调用 `sendUserText`。
 
@@ -186,5 +186,4 @@ watch(() => props.text, (newVal) => {
 ## 总结
 
 通过以上改造，Free‑Agent‑Vtuber 的前端界面将从左右分栏布局转为以 Live2D 模型为主体的全屏展示，并在底部显示 AI 回复的字幕。新建的 `SubtitleBar` 组件负责将文本流式呈现，替代传统的聊天列表，提供更加沉浸的直播观看体验。
-
 
