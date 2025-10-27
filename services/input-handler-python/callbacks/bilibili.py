@@ -270,11 +270,13 @@ def _extract_event_id(payload: Dict[str, Any], data: Dict[str, Any]) -> Optional
 async def _mark_event_seen(
     event_id: Optional[str],
     event_type: str,
+    room_id: Optional[str],
     redis_client: Optional[redis.Redis],
 ) -> bool:
     if not event_id:
         return True
-    token = f"{settings.dedupe_prefix}:{event_type}:{event_id}"
+    normalized_room = (room_id or "").strip() or "unknown"
+    token = f"{settings.dedupe_prefix}:{normalized_room}:{event_type}:{event_id}"
 
     if redis_client is not None:
         try:
@@ -326,7 +328,7 @@ async def bilibili_callback(request: Request) -> JSONResponse:
     event_type = payload.get("event") or payload.get("event_type") or event.message_type
     data = _extract_event_data(payload, event_type or "")
     event_id = _extract_event_id(payload, data)
-    is_new = await _mark_event_seen(event_id, event_type or "unknown", redis_client)
+    is_new = await _mark_event_seen(event_id, event_type or "unknown", event.room_id, redis_client)
     if not is_new:
         return JSONResponse({"status": "duplicate"}, status_code=200)
 

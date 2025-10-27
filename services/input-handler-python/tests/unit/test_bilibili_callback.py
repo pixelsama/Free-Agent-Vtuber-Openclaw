@@ -126,6 +126,44 @@ def test_duplicate_event_returns_duplicate(callback_module, monkeypatch: pytest.
         assert len(fake_redis.published) == 1
 
 
+def test_duplicate_event_isolated_by_room(callback_module, monkeypatch: pytest.MonkeyPatch):
+    fake_redis = FakeRedis()
+    client = _setup_test_client(callback_module, monkeypatch, fake_redis)
+
+    payload_room_a = {
+        "event": "superChatMessage",
+        "room_id": 1001,
+        "data": {
+            "id": "shared-id",
+            "message": "First room",
+            "price": 10,
+            "user_info": {"uid": 1, "uname": "RoomA"},
+        },
+    }
+    payload_room_b = {
+        "event": "superChatMessage",
+        "room_id": 2002,
+        "data": {
+            "id": "shared-id",
+            "message": "Second room",
+            "price": 10,
+            "user_info": {"uid": 2, "uname": "RoomB"},
+        },
+    }
+
+    body_a = json.dumps(payload_room_a, ensure_ascii=False).encode("utf-8")
+    body_b = json.dumps(payload_room_b, ensure_ascii=False).encode("utf-8")
+    headers_a = _sign_payload(body_a, "test-secret", {})
+    headers_b = _sign_payload(body_b, "test-secret", {})
+
+    with client:
+        response_a = client.post("/bilibili/callback", data=body_a, headers=headers_a)
+        response_b = client.post("/bilibili/callback", data=body_b, headers=headers_b)
+
+        assert response_a.status_code == 202
+        assert response_b.status_code == 202
+        assert len(fake_redis.published) == 2
+
 def test_invalid_signature_rejected(callback_module, monkeypatch: pytest.MonkeyPatch):
     fake_redis = FakeRedis()
     client = _setup_test_client(callback_module, monkeypatch, fake_redis)
