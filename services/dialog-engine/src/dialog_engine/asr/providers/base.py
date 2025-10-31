@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import abc
-from typing import AsyncGenerator
+from typing import AsyncGenerator, AsyncIterable
 
 from ..types import AsrOptions, AsrPartial, AsrResult
 
@@ -11,8 +11,12 @@ class AsrProvider(abc.ABC):
 
     name: str
 
-    async def stream(self, *, audio: bytes, options: AsrOptions) -> AsyncGenerator[AsrPartial, None]:
-        result = await self.transcribe(audio=audio, options=options)
+    async def stream(self, *, audio: AsyncIterable[bytes], options: AsrOptions) -> AsyncGenerator[AsrPartial, None]:
+        collected = bytearray()
+        async for chunk in audio:
+            if chunk:
+                collected.extend(chunk)
+        result = await self.transcribe(audio=bytes(collected), options=options)
         partials = list(result.partials or [])
         final_emitted = False
         for partial in partials:
