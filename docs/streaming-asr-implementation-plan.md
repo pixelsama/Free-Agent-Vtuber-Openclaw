@@ -34,6 +34,7 @@
 - `AsrProvider` / `AsrService` 支持真正的流式生成，`chat_audio_stream` 在 SSE 中实时发送 `asr-partial` 事件后再进入 LLM 回复阶段。
 - 为向后兼容，`transcribe_bundle` 仍可返回批量结果，且在被 monkeypatch 时作为流式路径的最终兜底。
 - `input-handler` 通过 `/chat/audio/stream` 建立 SSE，边上传音频边转发 `asr-partial`、`text-delta` 事件到 Redis，`output-handler` 与前端 WebSocket 即时展示转写与回复增量。
+- 火山引擎凭证通过 `ASR_VOLC_APP_KEY/ACCESS_KEY/RESOURCE_ID` 环境变量注入，服务端记录 `X-Tt-Logid` 并在日志/统计中追加 `asr.volcengine.latency_ms`、`error_code` 等信息，连续失败后自动回退本地 Mock ASR。
 
 ### 4. 基础设施与性能
 - 评估流式模型的 CPU/GPU 占用，调整部署拓扑、容器资源、自动扩缩容策略。

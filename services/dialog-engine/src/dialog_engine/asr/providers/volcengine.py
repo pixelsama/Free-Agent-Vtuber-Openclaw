@@ -4,8 +4,9 @@ import asyncio
 import json
 import logging
 import secrets
+import time
 import uuid
-from typing import AsyncIterable, AsyncGenerator, Iterable, List, Optional
+from typing import AsyncIterable, AsyncGenerator, Iterable, List, Optional, Tuple
 
 import websockets
 from websockets.exceptions import ConnectionClosed, ConnectionClosedError, ConnectionClosedOK
@@ -14,6 +15,15 @@ from ..types import AsrOptions, AsrPartial, AsrResult
 from .base import AsrProvider
 
 logger = logging.getLogger(__name__)
+
+
+class VolcengineAsrError(RuntimeError):
+    """Raised when Volcengine streaming encounters a fatal error."""
+
+    def __init__(self, message: str, *, code: Optional[str] = None, log_id: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.log_id = log_id
 
 
 class VolcengineAsrProvider(AsrProvider):
@@ -55,6 +65,9 @@ class VolcengineAsrProvider(AsrProvider):
         if not self._app_key or not self._access_key or not self._resource_id:
             raise RuntimeError("Volcengine credentials must be configured to use volcengine ASR provider")
 
+        self._last_log_id: Optional[str] = None
+        self._last_error_code: Optional[str] = None
+
     async def transcribe(self, *, audio: bytes, options: AsrOptions) -> AsrResult:
         async def audio_iter() -> AsyncGenerator[bytes, None]:
             if audio:
@@ -80,6 +93,10 @@ class VolcengineAsrProvider(AsrProvider):
         endpoint = self._endpoint or self._DEFAULT_ENDPOINT
         headers = self._build_headers()
         params_payload = self._build_request_params(options)
+        connect_id = headers.get("X-Api-Connect-Id")
+        start_time = time.perf_counter()
+        self._last_log_id = None
+        self._last_error_code = None
 
         try:
             async with websockets.connect(
@@ -90,6 +107,13 @@ class VolcengineAsrProvider(AsrProvider):
                 ping_timeout=None,
                 close_timeout=self._request_timeout,
             ) as ws:
+                self._last_log_id = ws.response_headers.get("X-Tt-Logid") if hasattr(ws, "response_headers") else None
+                logger.info(
+                    "volcengine.asr.connected connect_id=%s logid=%s sample_rate=%s",
+                    connect_id,
+                    self._last_log_id,
+                    params_payload.get("transcription", {}).get("sample_rate"),
+                )
                 await self._send_config(ws, params_payload)
 
                 sequence = 0
@@ -103,11 +127,34 @@ class VolcengineAsrProvider(AsrProvider):
 
                 async for partial in self._receive_results(ws):
                     yield partial
+                self._last_error_code = None
         except (ConnectionClosedError, ConnectionClosedOK, ConnectionClosed) as exc:
-            logger.debug("volcengine.asr.connection_closed: code=%s reason=%s", getattr(exc, "code", "?"), getattr(exc, "reason", "?"))
-        except Exception:
-            logger.exception("volcengine.asr.stream_failed")
+            code = str(getattr(exc, "code", "")) or None
+            reason = getattr(exc, "reason", "")
+            logger.error(
+                "volcengine.asr.connection_closed code=%s reason=%s connect_id=%s logid=%s",
+                code,
+                reason,
+                connect_id,
+                self._last_log_id,
+            )
+            self._last_error_code = code or "connection_closed"
+            raise VolcengineAsrError(reason or "volcengine_connection_closed", code=self._last_error_code, log_id=self._last_log_id) from exc
+        except VolcengineAsrError:
             raise
+        except Exception as exc:
+            logger.exception("volcengine.asr.stream_failed connect_id=%s logid=%s", connect_id, self._last_log_id)
+            self._last_error_code = "stream_failed"
+            raise VolcengineAsrError(str(exc) or "volcengine_stream_failed", code=self._last_error_code, log_id=self._last_log_id) from exc
+        finally:
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            logger.info(
+                "asr.volcengine.latency_ms=%.1f connect_id=%s logid=%s error_code=%s",
+                latency_ms,
+                connect_id,
+                self._last_log_id,
+                self._last_error_code,
+            )
 
     def _build_headers(self) -> dict[str, str]:
         connect_suffix = secrets.token_hex(4)
@@ -151,7 +198,6 @@ class VolcengineAsrProvider(AsrProvider):
         await ws.send(frame)
 
     async def _send_audio_done(self, ws: websockets.WebSocketClientProtocol, *, seq: int) -> None:
-        # Send a zero-length chunk flagged as the final packet.
         frame = self._encode_frame(
             message_type=self._MESSAGE_TYPE_AUDIO,
             flags=self._FLAG_LAST_PACKET,
@@ -165,8 +211,11 @@ class VolcengineAsrProvider(AsrProvider):
             try:
                 for partial in self._parse_message(message):
                     yield partial
-            except Exception:
-                logger.exception("volcengine.asr.parse_failed")
+            except VolcengineAsrError:
+                raise
+            except Exception as exc:
+                logger.exception("volcengine.asr.parse_failed logid=%s", self._last_log_id)
+                raise VolcengineAsrError(str(exc) or "volcengine_parse_failed", log_id=self._last_log_id) from exc
 
     def _parse_message(self, message: object) -> Iterable[AsrPartial]:
         if isinstance(message, bytes):
@@ -186,8 +235,8 @@ class VolcengineAsrProvider(AsrProvider):
         serialization = (header[2] >> 4) & 0x0F
 
         if message_type == self._MESSAGE_TYPE_ERROR:
-            error_payload = payload.decode("utf-8", errors="ignore") if payload else ""
-            raise RuntimeError(f"volcengine ASR error: {error_payload}")
+            message, code = self._extract_error(payload)
+            raise VolcengineAsrError(message, code=code, log_id=self._last_log_id)
 
         if message_type != self._MESSAGE_TYPE_RESPONSE:
             return []
@@ -211,7 +260,7 @@ class VolcengineAsrProvider(AsrProvider):
 
         if isinstance(payload, dict):
             if self._is_error_payload(payload):
-                raise RuntimeError(f"volcengine ASR error: {payload}")
+                raise VolcengineAsrError(str(payload), log_id=self._last_log_id)
 
             data_candidates = []
             for key in ("data", "res", "result", "response"):
@@ -269,6 +318,23 @@ class VolcengineAsrProvider(AsrProvider):
         payload_size = len(payload).to_bytes(4, "big", signed=False)
         return bytes(header) + payload_size + payload
 
+    def _extract_error(self, payload: bytes) -> Tuple[str, Optional[str]]:
+        message = payload.decode("utf-8", errors="ignore") if payload else ""
+        code: Optional[str] = None
+        if message:
+            try:
+                obj = json.loads(message)
+                if isinstance(obj, dict):
+                    code_val = obj.get("code") or obj.get("error_code")
+                    if code_val is not None:
+                        code = str(code_val)
+                    msg_val = obj.get("message") or obj.get("msg")
+                    if isinstance(msg_val, str) and msg_val.strip():
+                        message = msg_val.strip()
+            except json.JSONDecodeError:
+                pass
+        return message or "volcengine_error", code
+
     @staticmethod
     def _is_error_payload(payload: dict) -> bool:
         error_code = payload.get("code") or payload.get("error_code")
@@ -279,6 +345,14 @@ class VolcengineAsrProvider(AsrProvider):
         except (TypeError, ValueError):
             return True
         return error_code not in {0, 1000, 20000000}
+
+    @property
+    def last_log_id(self) -> Optional[str]:
+        return self._last_log_id
+
+    @property
+    def last_error_code(self) -> Optional[str]:
+        return self._last_error_code
 
 
 def _safe_float(value: object) -> Optional[float]:

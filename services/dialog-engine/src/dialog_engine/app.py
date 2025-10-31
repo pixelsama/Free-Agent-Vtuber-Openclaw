@@ -114,6 +114,8 @@ def _emit_async_events(
                 "provider": asr_stats.get("provider"),
                 "latency_ms": asr_stats.get("latency_ms"),
                 "duration_seconds": asr_stats.get("duration_seconds"),
+                "error_code": asr_stats.get("error_code"),
+                "log_id": asr_stats.get("log_id"),
                 "ts": ts,
             },
         )
@@ -457,6 +459,8 @@ async def chat_audio_stream(request: Request) -> StreamingResponse:
             },
             "total_latency_ms": round((reply_completed - asr_started) * 1000.0, 1),
         }
+        stats["asr"]["log_id"] = getattr(asr_service, "last_log_id", None)
+        stats["asr"]["error_code"] = getattr(asr_service, "last_error_code", None)
 
         done_payload = {
             "sessionId": session_id,

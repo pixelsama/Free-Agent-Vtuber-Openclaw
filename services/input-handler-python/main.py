@@ -388,6 +388,8 @@ class InputHandler:
         }
         if "eos" in data:
             payload["eos"] = data.get("eos")
+        if "log_id" in data:
+            payload["log_id"] = data.get("log_id")
         await self._publish_payload(task_id, payload)
 
     async def _publish_payload(self, task_id: str, payload: Dict[str, Any]) -> None:
@@ -483,6 +485,9 @@ class InputHandler:
                     headers=headers,
                 ) as resp:
                     resp.raise_for_status()
+                    log_id = resp.headers.get("X-Tt-Logid")
+                    if log_id:
+                        logger.info("dialog-engine audio stream task_id=%s logid=%s", task_id, log_id)
                     current_event = "message"
                     async for line in resp.aiter_lines():
                         if line == "":
@@ -502,6 +507,8 @@ class InputHandler:
                             except json.JSONDecodeError:
                                 logger.debug(f"Non-JSON SSE payload ignored: %s", payload_raw[:80])
                                 continue
+                            if log_id and isinstance(data_obj, dict) and not data_obj.get("log_id"):
+                                data_obj["log_id"] = log_id
                             yield current_event, data_obj
                             if current_event.lower() in {"done", "error"}:
                                 return

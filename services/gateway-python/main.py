@@ -210,6 +210,9 @@ class StreamingInputProxy:
         try:
             async with websockets.connect(backend_url, max_size=None) as backend_ws:
                 logger.info("Connected to input-handler backend: %s (ID: %s)", backend_url, conn_id)
+                backend_logid = backend_ws.response_headers.get("X-Tt-Logid") if hasattr(backend_ws, "response_headers") else None
+                if backend_logid:
+                    logger.info("gateway.input_stream.logid conn_id=%s logid=%s", conn_id, backend_logid)
                 tasks = [
                     asyncio.create_task(self._forward_client_to_backend(client_ws, backend_ws, session, conn_id)),
                     asyncio.create_task(self._forward_backend_to_client(client_ws, backend_ws, session, conn_id)),

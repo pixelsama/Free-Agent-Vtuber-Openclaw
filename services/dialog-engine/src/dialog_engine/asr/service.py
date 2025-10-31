@@ -4,12 +4,19 @@ from typing import AsyncIterator, Callable, Optional
 
 import asyncio
 import contextlib
+import logging
 
 from ..audio.types import AudioMetadata
 from ..audio import AudioBundle
 from ..settings import AsrSettings
 from .providers.base import AsrProvider
 from .providers.mock import MockAsrProvider
+
+try:
+    from .providers.volcengine import VolcengineAsrProvider, VolcengineAsrError
+except Exception:  # pragma: no cover - optional dependency
+    VolcengineAsrProvider = None  # type: ignore[assignment]
+    VolcengineAsrError = Exception  # type: ignore[assignment]
 
 try:
     from .providers.whisper import WhisperAsrProvider
@@ -19,6 +26,7 @@ except Exception:  # pragma: no cover - defensive guard
     WhisperAsrProvider = None  # type: ignore[assignment]
 from .types import AsrOptions, AsrPartial, AsrResult
 
+logger = logging.getLogger(__name__)
 
 class AsrService:
     """Coordinates ASR provider usage."""
@@ -27,6 +35,13 @@ class AsrService:
 
     def __init__(self, *, provider: Optional[AsrProvider] = None) -> None:
         self._provider = provider or MockAsrProvider()
+        self._primary_provider = self._provider
+        self._fallback_provider: AsrProvider = MockAsrProvider()
+        self._failover_threshold = 0
+        self._consecutive_failures = 0
+        self._using_fallback = False
+        self._last_error_code: Optional[str] = None
+        self._last_log_id: Optional[str] = None
 
     @classmethod
     def from_settings(cls, cfg: AsrSettings | None) -> "AsrService":
@@ -47,10 +62,8 @@ class AsrService:
                     default_sample_rate=cfg.target_sample_rate,
                 )
             elif provider_name in {"volcengine", "volc", "bytedance"}:
-                try:
-                    from .providers.volcengine import VolcengineAsrProvider
-                except Exception as exc:  # pragma: no cover - optional dependency guard
-                    raise RuntimeError("Volcengine ASR provider unavailable") from exc
+                if VolcengineAsrProvider is None:
+                    raise RuntimeError("Volcengine ASR provider unavailable")
                 provider = VolcengineAsrProvider(
                     endpoint=cfg.volc_endpoint,
                     app_key=cfg.volc_app_key,
@@ -58,15 +71,30 @@ class AsrService:
                     resource_id=cfg.volc_resource_id,
                     connect_id_prefix=cfg.volc_connect_id_prefix,
                     default_sample_rate=cfg.target_sample_rate,
+                    request_timeout=cfg.volc_timeout_seconds,
                 )
             else:
                 raise RuntimeError(f"unsupported ASR provider: {cfg.provider}")
-        return cls(provider=provider)
+        service = cls(provider=provider)
+        if (
+            cfg is not None
+            and provider is not None
+            and VolcengineAsrProvider is not None
+            and isinstance(provider, VolcengineAsrProvider)
+        ):
+            service._failover_threshold = max(0, int(cfg.volc_failover_threshold))
+        return service
 
     async def transcribe_bundle(self, bundle: AudioBundle, *, options: Optional[AsrOptions] = None) -> AsrResult:
         opts = options or AsrOptions()
         opts.sample_rate = opts.sample_rate or bundle.metadata.sample_rate
-        result = await self._provider.transcribe(audio=bundle.pcm, options=opts)
+        try:
+            result = await self._provider.transcribe(audio=bundle.pcm, options=opts)
+        except Exception as exc:
+            self._record_failure(self._provider, exc)
+            raise
+        else:
+            self._record_success(self._provider)
         partials = list(result.partials or [])
         if not partials or not partials[-1].is_final:
             final_text = partials[-1].text if partials else result.text
@@ -94,6 +122,8 @@ class AsrService:
             provider=self._provider,
             audio_iter_factory=audio_iter_factory,
             options=opts,
+            on_success=self._record_success,
+            on_failure=self._record_failure,
         )
 
     def _make_audio_iter_factory(
@@ -119,6 +149,55 @@ class AsrService:
 
         return audio_iter
 
+    def _record_success(self, provider: AsrProvider) -> None:
+        self._consecutive_failures = 0
+        self._last_error_code = None
+        self._last_log_id = getattr(provider, "last_log_id", None)
+
+    def _record_failure(self, provider: AsrProvider, exc: Exception) -> None:
+        self._consecutive_failures += 1
+        error_code = getattr(exc, "code", None)
+        if error_code is None:
+            error_code = exc.__class__.__name__
+        if isinstance(error_code, (int, float)):
+            error_code = str(error_code)
+        self._last_error_code = error_code
+        self._last_log_id = getattr(provider, "last_log_id", None)
+
+        logger.warning(
+            "asr.provider_failure provider=%s consecutive_failures=%s threshold=%s error_code=%s",
+            provider.name,
+            self._consecutive_failures,
+            self._failover_threshold,
+            self._last_error_code,
+        )
+
+        if (
+            not self._using_fallback
+            and self._failover_threshold > 0
+            and self._consecutive_failures >= self._failover_threshold
+        ):
+            logger.error(
+                "asr.provider_failover activating fallback after %s failures",
+                self._consecutive_failures,
+            )
+            self._activate_fallback()
+
+    def _activate_fallback(self) -> None:
+        if self._using_fallback:
+            return
+        self._provider = self._fallback_provider
+        self._using_fallback = True
+        logger.warning("asr.provider switched to fallback provider=%s", self._provider.name)
+
+    @property
+    def last_error_code(self) -> Optional[str]:
+        return self._last_error_code
+
+    @property
+    def last_log_id(self) -> Optional[str]:
+        return self._last_log_id
+
 
 class AsrStreamHandle:
     """Utility wrapper that bridges provider streaming results to consumers."""
@@ -129,10 +208,14 @@ class AsrStreamHandle:
         provider: AsrProvider,
         audio_iter_factory: Callable[[], AsyncIterator[bytes]],
         options: AsrOptions,
+        on_success: Optional[Callable[[AsrProvider], None]] = None,
+        on_failure: Optional[Callable[[AsrProvider, Exception], None]] = None,
     ) -> None:
         self._provider = provider
         self._audio_iter_factory = audio_iter_factory
         self._options = options
+        self._on_success = on_success
+        self._on_failure = on_failure
         self._queue: asyncio.Queue[AsrPartial | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
         self._result_future: asyncio.Future[AsrResult] = loop.create_future()
@@ -183,9 +266,19 @@ class AsrStreamHandle:
                 duration_seconds=None,
                 provider=self._provider.name,
             )
+            if self._on_success:
+                try:
+                    self._on_success(self._provider)
+                except Exception:  # pragma: no cover - defensive
+                    logger.exception("asr.stream_handle.success_callback_failed")
             if not self._result_future.done():
                 self._result_future.set_result(result)
         except Exception as exc:
+            if self._on_failure:
+                try:
+                    self._on_failure(self._provider, exc)
+                except Exception:  # pragma: no cover
+                    logger.exception("asr.stream_handle.failure_callback_failed")
             if not self._result_future.done():
                 self._result_future.set_exception(exc)
         finally:

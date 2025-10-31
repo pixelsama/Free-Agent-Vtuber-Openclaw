@@ -101,6 +101,8 @@ class AsrSettings:
     volc_access_key: str | None = None
     volc_resource_id: str | None = None
     volc_connect_id_prefix: str | None = None
+    volc_timeout_seconds: float = 15.0
+    volc_failover_threshold: int = 5
 
 
 @dataclass(frozen=True)
@@ -171,6 +173,8 @@ def load_settings() -> Settings:
         volc_access_key=os.getenv("ASR_VOLC_ACCESS_KEY"),
         volc_resource_id=os.getenv("ASR_VOLC_RESOURCE_ID"),
         volc_connect_id_prefix=os.getenv("ASR_VOLC_CONNECT_ID_PREFIX", "dialog-engine"),
+        volc_timeout_seconds=_env_float("ASR_VOLC_TIMEOUT_SECONDS", 15.0),
+        volc_failover_threshold=_env_int("ASR_VOLC_FAILOVER_THRESHOLD", 5),
     )
 
     return Settings(

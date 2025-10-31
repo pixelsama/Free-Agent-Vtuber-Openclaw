@@ -71,6 +71,8 @@ def _make_settings(
             volc_access_key=None,
             volc_resource_id=None,
             volc_connect_id_prefix=None,
+            volc_timeout_seconds=15.0,
+            volc_failover_threshold=5,
         ),
     )
 
