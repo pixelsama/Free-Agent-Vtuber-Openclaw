@@ -33,14 +33,69 @@ const lastReceivedAudioChunkId = ref(-1); // Track the ID for the next expected 
 const receivedAudioUrl = ref(null); // URL for the final reassembled audio
 
 // Recording specific state
+const isStreamingAudio = ref(false);
+const streamingCodec = ref(null);
+const streamingCongestionWarning = ref(false);
 const isRecording = ref(false);
 const recorder = shallowRef(null);
 const recordedAudioChunks = shallowRef([]); // Store Blob chunks from MediaRecorder
 const recordingError = ref(null); // Store errors related to recording process
+const selectedChunkDurationMs = ref(0);
+
+const STREAMING_CHUNK_INTERVAL_MS = 250;
+const WS_BUFFER_THRESHOLD_BYTES = 512 * 1024;
+const MAX_PENDING_CHUNKS = 20;
+const MAX_PENDING_BYTES = 5 * 1024 * 1024;
+const AUDIO_MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/ogg;codecs=opus',
+  'audio/wav',
+];
+
+let pendingAudioChunks = [];
+let pendingAudioBytes = 0;
+let nextAudioChunkId = 0;
+let hasSentAudioStart = false;
+let chunkFlushTimer = null;
 
 // 使用 shallowRef 以避免深度响应性带来的性能问题，因为 WebSocket 实例不应是深度响应式的
 const inputWs = shallowRef(null);
 const outputWs = shallowRef(null);
+
+const resetStreamingInputState = () => {
+  isStreamingAudio.value = false;
+  streamingCodec.value = null;
+  streamingCongestionWarning.value = false;
+  selectedChunkDurationMs.value = 0;
+  pendingAudioChunks = [];
+  pendingAudioBytes = 0;
+  nextAudioChunkId = 0;
+  hasSentAudioStart = false;
+  if (chunkFlushTimer !== null) {
+    clearTimeout(chunkFlushTimer);
+    chunkFlushTimer = null;
+  }
+};
+
+const pickSupportedAudioMimeType = () => {
+  if (typeof window === 'undefined' || typeof window.MediaRecorder === 'undefined') {
+    return null;
+  }
+  if (typeof window.MediaRecorder.isTypeSupported !== 'function') {
+    return null;
+  }
+  for (const candidate of AUDIO_MIME_CANDIDATES) {
+    try {
+      if (window.MediaRecorder.isTypeSupported(candidate)) {
+        return candidate;
+      }
+    } catch (error) {
+      console.warn('MediaRecorder.isTypeSupported error for', candidate, error);
+    }
+  }
+  return null;
+};
 
 // --- WebSocket Logic ---
 
@@ -69,9 +124,142 @@ const resetState = () => {
     recorder.value = null;
     recordedAudioChunks.value = [];
     recordingError.value = null;
+    resetStreamingInputState();
 };
 
 export function useApi() {
+
+  const scheduleAudioChunkFlush = () => {
+    if (chunkFlushTimer !== null) {
+      return;
+    }
+    chunkFlushTimer = window.setTimeout(() => {
+      chunkFlushTimer = null;
+      flushAudioChunkQueue();
+    }, 10);
+  };
+
+  const flushAudioChunkQueue = (options = {}) => {
+    if (!inputWs.value || inputWs.value.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    if (!hasSentAudioStart) {
+      return;
+    }
+
+    const force = options.force === true;
+    while (pendingAudioChunks.length > 0) {
+      if (!force && inputWs.value.bufferedAmount > WS_BUFFER_THRESHOLD_BYTES) {
+        streamingCongestionWarning.value = true;
+        scheduleAudioChunkFlush();
+        return;
+      }
+
+      const chunk = pendingAudioChunks.shift();
+      pendingAudioBytes -= chunk.blob.size;
+
+      const metadata = {
+        type: 'audio',
+        action: 'data_chunk',
+        chunk_id: chunk.id,
+        size: chunk.blob.size,
+        ts: chunk.timestamp,
+      };
+
+      try {
+        inputWs.value.send(JSON.stringify(metadata));
+        inputWs.value.send(chunk.blob);
+      } catch (error) {
+        console.error('Failed to send streaming audio chunk:', error);
+        pendingAudioChunks.unshift(chunk);
+        pendingAudioBytes += chunk.blob.size;
+        processingError.value = '发送实时音频数据时出错。';
+        streamingCongestionWarning.value = true;
+        return;
+      }
+    }
+    streamingCongestionWarning.value = false;
+  };
+
+  const beginAudioStreamingSession = ({ codec, sampleRate, chunkDurationMs }) => {
+    if (!inputWs.value || inputWs.value.readyState !== WebSocket.OPEN) {
+      throw new Error('输入 WebSocket 未连接，无法开始音频流。');
+    }
+    if (!taskId.value) {
+      throw new Error('任务 ID 尚未分配，无法开始音频流。');
+    }
+    if (hasSentAudioStart) {
+      return;
+    }
+
+    const startPayload = {
+      type: 'audio',
+      action: 'start',
+      codec: codec || null,
+      sample_rate: sampleRate || null,
+      chunk_duration_ms: chunkDurationMs || null,
+    };
+
+    inputWs.value.send(JSON.stringify(startPayload));
+    console.log('Sent audio streaming start payload:', startPayload);
+
+    streamingCodec.value = codec || null;
+    selectedChunkDurationMs.value = chunkDurationMs || 0;
+    hasSentAudioStart = true;
+    isStreamingAudio.value = true;
+    isProcessing.value = true;
+    uploadCompleteConfirmed.value = false;
+  };
+
+  const enqueueAudioChunk = (blob) => {
+    if (!blob || blob.size === 0) {
+      return;
+    }
+    if (!hasSentAudioStart) {
+      console.warn('音频流尚未初始化，忽略音频块。');
+      return;
+    }
+    const chunk = {
+      id: nextAudioChunkId,
+      blob,
+      timestamp: Date.now(),
+    };
+    nextAudioChunkId += 1;
+    pendingAudioChunks.push(chunk);
+    pendingAudioBytes += blob.size;
+
+    if (pendingAudioChunks.length > MAX_PENDING_CHUNKS || pendingAudioBytes > MAX_PENDING_BYTES) {
+      streamingCongestionWarning.value = true;
+      processingError.value = '实时音频发送滞后，请检查网络连接。';
+      console.warn('Audio streaming backpressure detected, stopping recorder to prevent overflow.');
+      if (recorder.value && recorder.value.state !== 'inactive') {
+        recorder.value.stop();
+      }
+      return;
+    }
+
+    flushAudioChunkQueue();
+  };
+
+  const finalizeAudioStreaming = (reason = 'completed') => {
+    if (!hasSentAudioStart) {
+      return;
+    }
+    flushAudioChunkQueue({ force: true });
+
+    if (inputWs.value && inputWs.value.readyState === WebSocket.OPEN) {
+      const stopPayload = {
+        type: 'audio',
+        action: 'stop',
+        total_chunks: nextAudioChunkId,
+        reason,
+      };
+      inputWs.value.send(JSON.stringify(stopPayload));
+      console.log('Sent audio streaming stop payload:', stopPayload);
+    }
+
+    resetStreamingInputState();
+  };
 
   // --- Input WebSocket Handling ---
 
@@ -106,6 +294,9 @@ export function useApi() {
         isConnectedInput.value = true;
         processingError.value = null;
         // Don't resolve yet, wait for task_id
+        if (hasSentAudioStart && pendingAudioChunks.length > 0) {
+          scheduleAudioChunkFlush();
+        }
       };
 
       inputWs.value.onmessage = (event) => {
@@ -148,12 +339,14 @@ export function useApi() {
         processingError.value = errorMsg;
         isConnectedInput.value = false;
         isProcessing.value = false;
+        resetStreamingInputState();
         reject(new Error(errorMsg)); // Reject the Promise on error
       };
 
       inputWs.value.onclose = (event) => {
         console.log('Input WebSocket disconnected:', event.reason);
         isConnectedInput.value = false;
+        resetStreamingInputState();
         inputWs.value = null;
         // Reject if closed before task ID was assigned?
         if (!taskId.value && event.code !== 1000) {
@@ -212,6 +405,7 @@ export function useApi() {
       inputWs.value.close();
       inputWs.value = null; // Release the reference
     }
+    resetStreamingInputState();
   };
 
   // --- Audio Reassembly ---
@@ -429,50 +623,12 @@ export function useApi() {
 
       console.log("Requesting microphone access...");
       recordingError.value = null; // Clear previous errors
-      recordedAudioChunks.value = []; // Reset chunks
+      recordedAudioChunks.value = []; // 保留以兼容旧逻辑，但不再用于发送
 
+      let stream;
       try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           console.log("Microphone access granted.");
-
-          // TODO: Consider specific MIME types supported by the backend (e.g., 'audio/wav', 'audio/webm')
-          // Browsers might have different defaults or support levels. 'audio/webm;codecs=opus' is common.
-          recorder.value = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-
-          recorder.value.ondataavailable = (event) => {
-              if (event.data.size > 0) {
-                  recordedAudioChunks.value.push(event.data);
-                  console.log("Recorded chunk size:", event.data.size);
-              }
-          };
-
-          recorder.value.onstop = () => {
-              console.log("[useApi] MediaRecorder onstop event triggered.");
-              console.log("Recording stopped. Total chunks:", recordedAudioChunks.value.length);
-              isRecording.value = false;
-              // Stop the tracks to release the microphone
-              stream.getTracks().forEach(track => track.stop());
-              // TODO: Trigger sending the collected audio chunks
-              if (recordedAudioChunks.value.length > 0) {
-                  sendAudioInput(); // Call the function to send data
-              } else {
-                  console.warn("No audio data recorded.");
-              }
-              console.log("[useApi] MediaRecorder onstop event handler finished.");
-          };
-
-          recorder.value.onerror = (event) => {
-              console.error("MediaRecorder error:", event.error);
-              recordingError.value = `录音出错: ${event.error.name}`;
-              isRecording.value = false;
-               // Stop the tracks on error as well
-              stream.getTracks().forEach(track => track.stop());
-          };
-
-          recorder.value.start(); // Start recording
-          isRecording.value = true;
-          console.log("Recording started.");
-
       } catch (err) {
           console.error("Error accessing microphone:", err);
           if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
@@ -480,7 +636,60 @@ export function useApi() {
           } else {
               recordingError.value = `无法访问麦克风: ${err.name}`;
           }
-          isRecording.value = false; // Ensure recording state is false on error
+          isRecording.value = false;
+          return;
+      }
+
+      try {
+          const preferredMime = pickSupportedAudioMimeType();
+          const recorderOptions = preferredMime ? { mimeType: preferredMime } : undefined;
+          recorder.value = new MediaRecorder(stream, recorderOptions);
+          const actualMime = recorder.value.mimeType || preferredMime || null;
+          streamingCodec.value = actualMime;
+
+          const audioTrack = stream.getAudioTracks()[0];
+          const trackSettings = audioTrack ? audioTrack.getSettings() : {};
+          const sampleRate = trackSettings.sampleRate;
+          const chunkDurationMs = STREAMING_CHUNK_INTERVAL_MS;
+
+          beginAudioStreamingSession({
+              codec: actualMime,
+              sampleRate,
+              chunkDurationMs,
+          });
+
+          recorder.value.ondataavailable = (event) => {
+              if (event.data && event.data.size > 0) {
+                  enqueueAudioChunk(event.data);
+                  console.log("Recorded streaming chunk size:", event.data.size);
+              }
+          };
+
+          recorder.value.onstop = () => {
+              console.log("[useApi] MediaRecorder onstop event triggered.");
+              isRecording.value = false;
+              stream.getTracks().forEach(track => track.stop());
+              finalizeAudioStreaming('stopped');
+              console.log("[useApi] MediaRecorder onstop handler finished.");
+          };
+
+          recorder.value.onerror = (event) => {
+              console.error("MediaRecorder error:", event.error);
+              recordingError.value = `录音出错: ${event.error?.name || '未知错误'}`;
+              stream.getTracks().forEach(track => track.stop());
+              isRecording.value = false;
+              finalizeAudioStreaming('error');
+          };
+
+          recorder.value.start(chunkDurationMs);
+          isRecording.value = true;
+          console.log(`Recording started. mimeType=${actualMime}, timeslice=${chunkDurationMs}ms`);
+      } catch (err) {
+          console.error("Failed to start MediaRecorder:", err);
+          stream.getTracks().forEach(track => track.stop());
+          recordingError.value = `录音初始化失败: ${err.name || err.message}`;
+          isRecording.value = false;
+          finalizeAudioStreaming('error');
       }
   };
 
@@ -496,100 +705,6 @@ export function useApi() {
 
   // --- Sending Audio Input ---
   // Placeholder for the actual audio sending logic
-  const sendAudioInput = async () => {
-      if (!recordedAudioChunks.value || recordedAudioChunks.value.length === 0) {
-          console.error("No recorded audio data to send.");
-          return;
-      }
-       console.log("Preparing to send recorded audio...");
-
-      // 1. Ensure input WebSocket is connected and has a task ID
-      if (!inputWs.value || inputWs.value.readyState !== WebSocket.OPEN || !taskId.value) {
-          console.log("Input WebSocket not ready, attempting to connect...");
-          try {
-              // Use the existing connectInput logic which returns a Promise resolving with taskId
-              await connectInput(); // This should set up inputWs and taskId
-              if (!inputWs.value || inputWs.value.readyState !== WebSocket.OPEN || !taskId.value) {
-                   throw new Error("Failed to establish input connection or get task ID after attempt.");
-              }
-              console.log("Input connection established for audio sending. Task ID:", taskId.value);
-          } catch (error) {
-              console.error("Failed to connect input WebSocket for audio sending:", error);
-              processingError.value = "发送音频前无法连接到服务器。";
-              isProcessing.value = false; // Ensure processing is stopped
-              // Clear recorded chunks if connection fails? Or allow retry?
-              // recordedAudioChunks.value = [];
-              return;
-          }
-      }
-
-      // 2. Combine recorded chunks into a single Blob
-      // The backend expects chunks, but MediaRecorder gives chunks based on time slices or buffer fullness.
-      // We might need to re-chunk the combined Blob if the backend has strict size limits,
-      // or send the MediaRecorder chunks directly if the backend can handle variable sizes.
-      // For simplicity now, let's assume we send the chunks as MediaRecorder produced them.
-
-      console.log(`Sending ${recordedAudioChunks.value.length} audio chunks for task ${taskId.value}...`);
-      processingError.value = null; // Clear previous errors
-      isProcessing.value = true; // Start processing indicator
-      uploadCompleteConfirmed.value = false; // Reset confirmation flag
-
-      try {
-          const chunksToSend = recordedAudioChunks.value; // Use the chunks directly
-
-          // 3. Send chunks sequentially (metadata + binary)
-          for (let i = 0; i < chunksToSend.length; i++) {
-              const chunk = chunksToSend[i];
-              const metadata = {
-                  type: "audio", // Or recorder.value.mimeType if backend needs it?
-                  chunk_id: i,
-                  action: "data_chunk"
-              };
-
-              if (inputWs.value.readyState !== WebSocket.OPEN) {
-                  throw new Error("Input WebSocket closed unexpectedly during audio chunk sending.");
-              }
-              inputWs.value.send(JSON.stringify(metadata));
-              console.log(`Sent audio metadata chunk ${i}:`, metadata);
-
-              // Wait a tiny moment for the JSON to likely be processed before sending binary? Might not be needed.
-              // await new Promise(resolve => setTimeout(resolve, 5));
-
-              if (inputWs.value.readyState !== WebSocket.OPEN) {
-                 throw new Error("Input WebSocket closed unexpectedly before sending binary audio chunk.");
-              }
-              inputWs.value.send(chunk); // Send the Blob directly
-              console.log(`Sent audio binary chunk ${i}, size: ${chunk.size}`);
-
-              // Optional: Wait for 'File chunk received' confirmation? Could slow things down.
-          }
-
-          // 4. Send upload complete signal
-           if (inputWs.value.readyState !== WebSocket.OPEN) {
-              throw new Error("Input WebSocket closed unexpectedly before sending upload_complete.");
-           }
-          const uploadCompleteSignal = { action: "upload_complete" };
-          inputWs.value.send(JSON.stringify(uploadCompleteSignal));
-          console.log('Sent upload_complete signal for audio.');
-
-          // 5. Cleanup recorded data after successful initiation of sending
-          recordedAudioChunks.value = [];
-
-          // Note: isProcessing will be set to false when the output WS receives the final result or error.
-          // The input WS will disconnect itself upon receiving 'upload_processed'.
-
-      } catch (error) {
-          console.error("Error sending audio chunks:", error);
-          processingError.value = `发送音频时出错: ${error.message}`;
-          isProcessing.value = false; // Stop processing indicator on error
-          // Consider disconnecting inputWS here on error? It might auto-close anyway.
-          // disconnectInput();
-          // disconnectInput();
-          // Clear potentially partially sent data?
-          recordedAudioChunks.value = [];
-      }
-  };
-
   // --- HTTP TTS 拉取已移除：仅保留双 WS 模式 ---
 
   // Return reactive refs and methods
@@ -605,6 +720,9 @@ export function useApi() {
     // Export recording state and methods
     isRecording,
     recordingError,
+    isStreamingAudio,
+    streamingCodec,
+    streamingCongestionWarning,
     startRecording,
     stopRecording,
     // Export methods
