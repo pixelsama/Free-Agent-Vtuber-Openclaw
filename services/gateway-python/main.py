@@ -352,7 +352,7 @@ class StreamingInputProxy:
                 session.chunk_duration_ms,
             )
             start_forward = dict(data)
-            start_forward.setdefault("action", "stream_start")
+            start_forward["action"] = "stream_start"
             await backend_ws.send(json.dumps(start_forward, ensure_ascii=False))
             return True
 
