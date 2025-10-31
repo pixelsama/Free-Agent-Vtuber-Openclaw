@@ -1,8 +1,12 @@
 import asyncio
+import contextlib
+import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
-from typing import Dict
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -30,9 +34,42 @@ BACKEND_SERVICES = {
 
 DIALOG_ENGINE_URL = os.getenv("DIALOG_ENGINE_URL", "http://dialog-engine:8100")
 SSE_TIMEOUT = httpx.Timeout(60.0, connect=5.0, read=None, write=10.0)
+AUDIO_STREAM_IDLE_TIMEOUT = float(os.getenv("AUDIO_STREAM_IDLE_TIMEOUT", "20.0"))
+AUDIO_STREAM_MAX_CHUNK_BYTES = int(os.getenv("AUDIO_STREAM_MAX_CHUNK_BYTES", str(1 * 1024 * 1024)))
 
 # 活跃连接跟踪
 active_connections: Dict[str, WebSocket] = {}
+
+
+@dataclass
+class AudioStreamSession:
+    """Tracks state for a single inbound audio streaming connection."""
+
+    codec: Optional[str] = None
+    sample_rate: Optional[int] = None
+    chunk_duration_ms: Optional[int] = None
+    started: bool = False
+    last_chunk_id: int = -1
+    total_bytes: int = 0
+    last_activity: float = field(default_factory=time.monotonic)
+
+    def touch(self) -> None:
+        self.last_activity = time.monotonic()
+
+    def mark_started(self, *, codec: Optional[str], sample_rate: Optional[int], chunk_duration_ms: Optional[int]) -> None:
+        self.started = True
+        self.codec = codec
+        self.sample_rate = sample_rate
+        self.chunk_duration_ms = chunk_duration_ms
+        self.last_chunk_id = -1
+        self.total_bytes = 0
+        self.touch()
+
+    def register_chunk(self, chunk_id: int, size: int) -> None:
+        self.last_chunk_id = chunk_id
+        self.total_bytes += size
+        self.touch()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -150,14 +187,279 @@ class WebSocketProxy:
             logger.error(f"Error forwarding message ({direction}): {e}")
             raise
 
+class StreamingInputProxy:
+    """Handles frontend -> input-handler WebSocket traffic with audio stream awareness."""
+
+    def __init__(
+        self,
+        *,
+        idle_timeout: float = AUDIO_STREAM_IDLE_TIMEOUT,
+        max_chunk_bytes: int = AUDIO_STREAM_MAX_CHUNK_BYTES,
+    ) -> None:
+        self._idle_timeout = idle_timeout
+        self._max_chunk_bytes = max_chunk_bytes
+        self._connection_id = 0
+
+    async def handle(self, client_ws: WebSocket, backend_url: str) -> None:
+        conn_id = self._next_connection_id()
+        session = AudioStreamSession()
+        await client_ws.accept()
+        active_connections[conn_id] = client_ws
+        logger.info("Client connected to input stream (ID: %s)", conn_id)
+
+        try:
+            async with websockets.connect(backend_url, max_size=None) as backend_ws:
+                logger.info("Connected to input-handler backend: %s (ID: %s)", backend_url, conn_id)
+                tasks = [
+                    asyncio.create_task(self._forward_client_to_backend(client_ws, backend_ws, session, conn_id)),
+                    asyncio.create_task(self._forward_backend_to_client(client_ws, backend_ws, session, conn_id)),
+                    asyncio.create_task(self._monitor_idle(client_ws, backend_ws, session, conn_id)),
+                ]
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in pending:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+                for task in done:
+                    exc = task.exception()
+                    if exc:
+                        raise exc
+        except websockets.exceptions.ConnectionClosed as exc:
+            logger.info("Backend connection closed for %s (code=%s, reason=%s)", conn_id, exc.code, exc.reason)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Streaming proxy error (%s): %s", conn_id, exc, exc_info=True)
+            await self._send_error(client_ws, f"gateway_error: {exc}")
+            with contextlib.suppress(Exception):
+                await client_ws.close(code=1011, reason="gateway_error")
+        finally:
+            active_connections.pop(conn_id, None)
+            logger.info("Input stream connection %s cleaned up", conn_id)
+
+    async def _forward_client_to_backend(
+        self,
+        client_ws: WebSocket,
+        backend_ws: websockets.WebSocketClientProtocol,
+        session: AudioStreamSession,
+        conn_id: str,
+    ) -> None:
+        try:
+            while True:
+                message = await client_ws.receive()
+                msg_type = message.get("type")
+                if msg_type == "websocket.disconnect":
+                    logger.info("Client requested disconnect (%s)", conn_id)
+                    await backend_ws.close(code=1000)
+                    break
+
+                if msg_type != "websocket.receive":
+                    continue
+
+                if "text" in message:
+                    if not await self._handle_text_message(client_ws, backend_ws, session, message["text"], conn_id):
+                        break
+                elif "bytes" in message:
+                    if not await self._handle_binary_message(client_ws, backend_ws, session, message["bytes"], conn_id):
+                        break
+        except WebSocketDisconnect:
+            logger.info("Client WebSocket disconnect raised (%s)", conn_id)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Error forwarding client -> backend (%s): %s", conn_id, exc, exc_info=True)
+            raise
+
+    async def _forward_backend_to_client(
+        self,
+        client_ws: WebSocket,
+        backend_ws: websockets.WebSocketClientProtocol,
+        session: AudioStreamSession,
+        conn_id: str,
+    ) -> None:
+        try:
+            async for message in backend_ws:
+                session.touch()
+                if isinstance(message, str):
+                    await client_ws.send_text(message)
+                else:
+                    await client_ws.send_bytes(message)
+        except websockets.exceptions.ConnectionClosed:
+            logger.info("Backend closed output stream (%s)", conn_id)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Error forwarding backend -> client (%s): %s", conn_id, exc, exc_info=True)
+            raise
+
+    async def _monitor_idle(
+        self,
+        client_ws: WebSocket,
+        backend_ws: websockets.WebSocketClientProtocol,
+        session: AudioStreamSession,
+        conn_id: str,
+    ) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._idle_timeout / 2)
+                if not session.started:
+                    continue
+                idle_for = time.monotonic() - session.last_activity
+                if idle_for >= self._idle_timeout:
+                    warn = f"audio_stream_idle_timeout ({idle_for:.1f}s)"
+                    logger.warning("Idle audio stream detected (%s): %s", conn_id, warn)
+                    await self._send_error(client_ws, warn)
+                    await backend_ws.close(code=1011, reason="idle_timeout")
+                    with contextlib.suppress(Exception):
+                        await client_ws.close(code=4000, reason="idle_timeout")
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Idle monitor error (%s): %s", conn_id, exc, exc_info=True)
+
+    async def _handle_text_message(
+        self,
+        client_ws: WebSocket,
+        backend_ws: websockets.WebSocketClientProtocol,
+        session: AudioStreamSession,
+        payload: str,
+        conn_id: str,
+    ) -> bool:
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            await backend_ws.send(payload)
+            session.touch()
+            return True
+
+        msg_type = data.get("type")
+        action = str(data.get("action") or "").lower()
+        session.touch()
+
+        if msg_type != "audio":
+            await backend_ws.send(json.dumps(data, ensure_ascii=False))
+            return True
+
+        if action == "start":
+            if session.started:
+                await self._send_error(client_ws, "audio_stream_already_started")
+                return False
+            session.mark_started(
+                codec=data.get("codec"),
+                sample_rate=self._safe_int(data.get("sample_rate")),
+                chunk_duration_ms=self._safe_int(data.get("chunk_duration_ms")),
+            )
+            logger.info(
+                "Audio stream started (%s): codec=%s sample_rate=%s chunk=%sms",
+                conn_id,
+                session.codec,
+                session.sample_rate,
+                session.chunk_duration_ms,
+            )
+            start_forward = dict(data)
+            start_forward.setdefault("action", "stream_start")
+            await backend_ws.send(json.dumps(start_forward, ensure_ascii=False))
+            return True
+
+        if action == "data_chunk":
+            if not session.started:
+                await self._send_error(client_ws, "audio_stream_not_started")
+                return False
+            chunk_id = self._safe_int(data.get("chunk_id"))
+            if chunk_id is None:
+                await self._send_error(client_ws, "missing_chunk_id")
+                return False
+            expected_next = session.last_chunk_id + 1
+            if chunk_id != expected_next:
+                warn = f"chunk_id_mismatch expected={expected_next} got={chunk_id}"
+                logger.warning("Chunk mismatch (%s): %s", conn_id, warn)
+                await self._send_error(client_ws, warn)
+                return False
+            enriched = dict(data)
+            if session.codec:
+                enriched.setdefault("codec", session.codec)
+            if session.sample_rate:
+                enriched.setdefault("sample_rate", session.sample_rate)
+            if session.chunk_duration_ms:
+                enriched.setdefault("chunk_duration_ms", session.chunk_duration_ms)
+            await backend_ws.send(json.dumps(enriched, ensure_ascii=False))
+            return True
+
+        if action in {"stop", "upload_complete"}:
+            if not session.started:
+                await self._send_error(client_ws, "audio_stream_not_started")
+                return False
+            stop_payload: Dict[str, Any] = dict(data)
+            stop_payload["action"] = "upload_complete"
+            stop_payload["total_chunks"] = session.last_chunk_id + 1
+            if session.codec:
+                stop_payload.setdefault("codec", session.codec)
+            if session.sample_rate:
+                stop_payload.setdefault("sample_rate", session.sample_rate)
+            await backend_ws.send(json.dumps(stop_payload, ensure_ascii=False))
+            session.started = False
+            logger.info(
+                "Audio stream completed (%s): total_chunks=%s total_bytes=%s",
+                conn_id,
+                stop_payload["total_chunks"],
+                session.total_bytes,
+            )
+            return True
+
+        if action == "cancel":
+            logger.info("Audio stream canceled by client (%s)", conn_id)
+            cancel_payload = dict(data)
+            await backend_ws.send(json.dumps(cancel_payload, ensure_ascii=False))
+            session.started = False
+            await client_ws.close(code=4001, reason="client_cancel")
+            await backend_ws.close(code=1000, reason="client_cancel")
+            return False
+
+        await backend_ws.send(json.dumps(data, ensure_ascii=False))
+        return True
+
+    async def _handle_binary_message(
+        self,
+        client_ws: WebSocket,
+        backend_ws: websockets.WebSocketClientProtocol,
+        session: AudioStreamSession,
+        payload: bytes,
+        conn_id: str,
+    ) -> bool:
+        size = len(payload)
+        if size > self._max_chunk_bytes:
+            await self._send_error(client_ws, f"chunk_too_large ({size} > {self._max_chunk_bytes})")
+            return False
+        if not session.started:
+            await self._send_error(client_ws, "audio_stream_not_started")
+            return False
+
+        session.register_chunk(session.last_chunk_id + 1, size)
+        await backend_ws.send(payload)
+        return True
+
+    async def _send_error(self, client_ws: WebSocket, message: str) -> None:
+        payload = json.dumps({"type": "error", "message": message})
+        with contextlib.suppress(Exception):
+            await client_ws.send_text(payload)
+
+    def _safe_int(self, value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return None
+
+    def _next_connection_id(self) -> str:
+        self._connection_id += 1
+        return f"stream_input_{self._connection_id}"
+
 # 初始化代理
 proxy = WebSocketProxy()
+audio_proxy = StreamingInputProxy()
+
 
 @app.websocket("/ws/input")
 async def proxy_input(websocket: WebSocket):
     """代理输入WebSocket连接到input-handler服务"""
     backend_url = f"{BACKEND_SERVICES['input']}/ws/input"
-    await proxy.proxy_websocket(websocket, backend_url, "input")
+    await audio_proxy.handle(websocket, backend_url)
 
 @app.websocket("/ws/output/{task_id}")
 async def proxy_output(websocket: WebSocket, task_id: str):
