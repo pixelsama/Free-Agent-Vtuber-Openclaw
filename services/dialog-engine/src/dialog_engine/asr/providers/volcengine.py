@@ -169,12 +169,16 @@ class VolcengineAsrProvider(AsrProvider):
     def _build_request_params(self, options: AsrOptions) -> dict[str, object]:
         sample_rate = options.sample_rate or self._default_sample_rate
         payload = {
+            "audio": {
+                "format": "pcm",
+                "sample_rate": sample_rate,
+                "channel": 1,
+            },
             "transcription": {
                 "language": options.lang or "auto",
                 "enable_intermediate_result": True,
                 "enable_timestamp": bool(options.enable_timestamps),
-                "sample_rate": sample_rate,
-            }
+            },
         }
         return payload
 
