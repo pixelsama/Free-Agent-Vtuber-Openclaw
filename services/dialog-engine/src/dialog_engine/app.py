@@ -1,10 +1,11 @@
 import base64
 import binascii
 import json
-import logging
 import os
 import time
 from typing import AsyncGenerator, Dict, Any, List, Optional
+
+import logging
 
 import redis.asyncio as redis
 
@@ -21,7 +22,16 @@ from .live_chat_consumer import LiveChatConsumer, LiveChatConsumerSettings
 
 
 app = FastAPI()
+
+_log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
+logging.basicConfig(
+    level=_log_level,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
 logger = logging.getLogger(__name__)
+logger.setLevel(_log_level)
 
 # Initialize internal state store
 try:

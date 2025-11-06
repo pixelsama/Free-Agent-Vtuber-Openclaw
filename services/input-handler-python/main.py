@@ -484,7 +484,11 @@ class InputHandler:
                     json=body,
                     headers=headers,
                 ) as resp:
-                    resp.raise_for_status()
+                    if resp.status_code >= 400:
+                        # Read error body before leaving stream context to avoid httpx read() error
+                        content = await resp.aread()
+                        text = content.decode("utf-8", errors="ignore") if content else ""
+                        raise RuntimeError(f"dialog_engine_http_error:{resp.status_code}:{text}")
                     log_id = resp.headers.get("X-Tt-Logid")
                     if log_id:
                         logger.info("dialog-engine audio stream task_id=%s logid=%s", task_id, log_id)
@@ -505,7 +509,7 @@ class InputHandler:
                             try:
                                 data_obj = json.loads(payload_raw)
                             except json.JSONDecodeError:
-                                logger.debug(f"Non-JSON SSE payload ignored: %s", payload_raw[:80])
+                                logger.debug("Non-JSON SSE payload ignored: %s", payload_raw[:80])
                                 continue
                             if log_id and isinstance(data_obj, dict) and not data_obj.get("log_id"):
                                 data_obj["log_id"] = log_id
@@ -513,6 +517,11 @@ class InputHandler:
                             if current_event.lower() in {"done", "error"}:
                                 return
         except httpx.HTTPStatusError as exc:
+            # Fallback path if raise_for_status is used elsewhere
+            try:
+                await exc.response.aread()
+            except Exception:
+                pass
             try:
                 detail = exc.response.json()
             except ValueError:

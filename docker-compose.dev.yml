@@ -43,6 +43,7 @@ services:
       dockerfile: Dockerfile
     container_name: aivtuber-dialog-engine-dev
     environment:
+      - LOG_LEVEL=DEBUG
       - PORT=8100
       - PYTHONPATH=/app/src
       - REDIS_HOST=${REDIS_HOST:-redis}

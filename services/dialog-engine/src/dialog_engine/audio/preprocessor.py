@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import io
+import logging
+import subprocess
 from typing import Optional, Tuple
 
 try:  # pragma: no cover - optional dependency guard
     import numpy as np
 except Exception:  # pragma: no cover
     np = None  # type: ignore[assignment]
-
-try:  # pragma: no cover - optional dependency guard
-    import soundfile as sf
-except Exception:  # pragma: no cover
-    sf = None  # type: ignore[assignment]
 
 try:  # pragma: no cover - optional dependency guard
     import resampy
@@ -74,19 +71,77 @@ class AudioPreprocessor:
         return AudioBundle(pcm=pcm_bytes, metadata=metadata)
 
     async def _extract_pcm(self, payload: AudioPayload) -> Tuple["np.ndarray" | None, int, int]:
-        if np is None or sf is None:
-            return None, payload.sample_rate or self._target_sample_rate, payload.channels or self._target_channels
+        # Prefer PyAV (handles webm/opus, mp4, etc.); fallback to ffmpeg subprocess; otherwise assume raw PCM
+        target_rate = payload.sample_rate or self._target_sample_rate
+        channels = payload.channels or self._target_channels
         data = payload.data
         if not data:
-            return np.zeros(0, dtype=np.float32), payload.sample_rate or self._target_sample_rate, self._target_channels
+            if np is None:
+                return None, target_rate, channels
+            return np.zeros(0, dtype=np.float32), target_rate, self._target_channels
+
+        # Try PyAV
         try:
-            audio_array, sample_rate = sf.read(io.BytesIO(data), dtype="float32")
-        except Exception as exc:  # pragma: no cover - propagates decode errors
-            raise ValueError("unsupported audio encoding") from exc
-        if audio_array.ndim == 1:
-            audio_array = audio_array[:, None]
-        channels = audio_array.shape[1]
-        return audio_array, int(sample_rate), channels
+            import av
+            from av.audio.resampler import AudioResampler
+
+            container = av.open(io.BytesIO(data), mode="r")
+            audio_stream = next((s for s in container.streams if s.type == "audio"), None)
+            if audio_stream is not None:
+                logging.debug("audio.preprocessor: using PyAV decoder for content_type=%s", payload.content_type)
+                resampler = AudioResampler(format="s16", layout="mono", rate=target_rate)
+                pcm_list = []
+                for packet in container.demux(audio_stream):
+                    for frame in packet.decode():
+                        for rframe in resampler.resample(frame):
+                            arr = rframe.to_ndarray()
+                            arr = np.asarray(arr, dtype=np.float32)
+                            arr = arr.reshape(-1, 1)
+                            pcm_list.append(arr / 32768.0)
+                if pcm_list:
+                    audio_array = np.concatenate(pcm_list, axis=0)
+                    return audio_array, int(target_rate), int(audio_array.shape[1])
+        except Exception as exc:
+            logging.debug("audio.preprocessor: PyAV decode failed: %s", exc)
+
+        # Fallback to ffmpeg subprocess (if available)
+        try:
+            cmd = [
+                "ffmpeg", "-v", "quiet", "-y",
+                "-i", "pipe:0",
+                "-acodec", "pcm_f32le",
+                "-ac", "1",
+                "-ar", str(target_rate),
+                "-f", "f32le",
+                "pipe:1",
+            ]
+            proc = subprocess.run(cmd, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            raw = proc.stdout
+            if np is None:
+                # Cannot form ndarray; treat as raw PCM (float32 little-endian)
+                return None, target_rate, 1
+            if raw:
+                logging.debug("audio.preprocessor: using ffmpeg fallback decoder for content_type=%s", payload.content_type)
+                arr = np.frombuffer(raw, dtype="<f4")
+                arr = arr.reshape((-1, 1)) if arr.ndim == 1 else arr
+                return arr.astype(np.float32), int(target_rate), 1
+        except Exception as exc:
+            logging.debug("audio.preprocessor: ffmpeg decode failed: %s", exc)
+
+        # As last resort, assume incoming is already PCM compatible with target settings
+        if np is None:
+            return None, target_rate, channels
+        logging.debug(
+            "audio.preprocessor: falling back to raw PCM interpretation for content_type=%s",
+            payload.content_type,
+        )
+        if len(data) % 4 == 0:
+            arr = np.frombuffer(data, dtype="<f4")
+            arr = arr.reshape(-1, 1)
+        else:
+            arr = np.frombuffer(data, dtype="<i2").astype(np.float32)
+            arr = (arr / 32768.0).reshape(-1, 1)
+        return arr.astype(np.float32), target_rate, 1
 
     def _mix_down(self, pcm: "np.ndarray", channels: int) -> "np.ndarray":
         if channels <= 1:
