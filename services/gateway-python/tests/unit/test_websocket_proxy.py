@@ -1,12 +1,18 @@
 import asyncio
-from unittest.mock import AsyncMock, Mock, patch
+import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import websockets
 from websockets.exceptions import ConnectionClosed
 
 # 导入要测试的模块
-from main import WebSocketProxy, app
+from main import (
+    AudioStreamSession,
+    StreamingInputProxy,
+    WebSocketProxy,
+    app,
+)
 
 
 @pytest.mark.asyncio
@@ -137,3 +143,94 @@ async def test_forward_messages_general_exception():
     # 调用转发方法，应该抛出异常
     with pytest.raises(Exception, match="General error"):
         await proxy._forward_messages(mock_source, mock_destination, "test_direction")
+
+
+@pytest.mark.asyncio
+async def test_streaming_proxy_start_message():
+    proxy = StreamingInputProxy()
+    session = AudioStreamSession()
+    client_ws = AsyncMock()
+    backend_ws = AsyncMock()
+
+    payload = json.dumps({
+        "type": "audio",
+        "action": "start",
+        "codec": "audio/webm;codecs=opus",
+        "sample_rate": 16000,
+        "chunk_duration_ms": 200,
+    })
+
+    result = await proxy._handle_text_message(client_ws, backend_ws, session, payload, "conn1")
+    assert result is True
+    assert session.started is True
+    backend_ws.send.assert_called_once()
+    forwarded = json.loads(backend_ws.send.call_args[0][0])
+    assert forwarded["action"] == "stream_start"
+    assert forwarded["codec"] == "audio/webm;codecs=opus"
+
+
+@pytest.mark.asyncio
+async def test_streaming_proxy_data_chunk_enriches_metadata():
+    proxy = StreamingInputProxy()
+    session = AudioStreamSession()
+    session.mark_started(codec="audio/webm", sample_rate=16000, chunk_duration_ms=250)
+    client_ws = AsyncMock()
+    backend_ws = AsyncMock()
+
+    payload = json.dumps({
+        "type": "audio",
+        "action": "data_chunk",
+        "chunk_id": 0,
+        "size": 1234,
+    })
+
+    result = await proxy._handle_text_message(client_ws, backend_ws, session, payload, "conn2")
+    assert result is True
+    backend_ws.send.assert_called_once()
+    forwarded = json.loads(backend_ws.send.call_args[0][0])
+    assert forwarded["chunk_id"] == 0
+    assert forwarded["sample_rate"] == 16000
+    assert forwarded["chunk_duration_ms"] == 250
+
+
+@pytest.mark.asyncio
+async def test_streaming_proxy_stop_converts_to_upload_complete():
+    proxy = StreamingInputProxy()
+    session = AudioStreamSession()
+    session.mark_started(codec="audio/webm", sample_rate=16000, chunk_duration_ms=250)
+    session.register_chunk(0, 1024)
+    client_ws = AsyncMock()
+    backend_ws = AsyncMock()
+
+    payload = json.dumps({
+        "type": "audio",
+        "action": "stop",
+        "reason": "completed",
+    })
+
+    result = await proxy._handle_text_message(client_ws, backend_ws, session, payload, "conn3")
+    assert result is True
+    backend_ws.send.assert_called_once()
+    forwarded = json.loads(backend_ws.send.call_args[0][0])
+    assert forwarded["action"] == "upload_complete"
+    assert forwarded["total_chunks"] == 1
+    assert forwarded["sample_rate"] == 16000
+    assert session.started is False
+
+
+@pytest.mark.asyncio
+async def test_streaming_proxy_chunk_size_limit_triggers_error():
+    proxy = StreamingInputProxy(max_chunk_bytes=4)
+    session = AudioStreamSession()
+    session.mark_started(codec="audio/webm", sample_rate=16000, chunk_duration_ms=250)
+    client_ws = AsyncMock()
+    backend_ws = AsyncMock()
+
+    payload = b"toolarge"
+
+    result = await proxy._handle_binary_message(client_ws, backend_ws, session, payload, "conn4")
+    assert result is False
+    client_ws.send_text.assert_called_once()
+    err = json.loads(client_ws.send_text.call_args[0][0])
+    assert err["type"] == "error"
+    assert "chunk_too_large" in err["message"]

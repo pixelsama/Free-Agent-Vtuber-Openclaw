@@ -96,6 +96,13 @@ class AsrSettings:
     whisper_compute_type: str
     whisper_beam_size: int
     whisper_cache_dir: str | None
+    volc_endpoint: str | None = None
+    volc_app_key: str | None = None
+    volc_access_key: str | None = None
+    volc_resource_id: str | None = None
+    volc_connect_id_prefix: str | None = None
+    volc_timeout_seconds: float = 15.0
+    volc_failover_threshold: int = 5
 
 
 @dataclass(frozen=True)
@@ -161,6 +168,13 @@ def load_settings() -> Settings:
         whisper_compute_type=os.getenv("ASR_WHISPER_COMPUTE_TYPE", "int8"),
         whisper_beam_size=_env_int("ASR_WHISPER_BEAM_SIZE", 1),
         whisper_cache_dir=os.getenv("ASR_WHISPER_CACHE_DIR"),
+        volc_endpoint=os.getenv("ASR_VOLC_ENDPOINT", "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"),
+        volc_app_key=os.getenv("ASR_VOLC_APP_KEY"),
+        volc_access_key=os.getenv("ASR_VOLC_ACCESS_KEY"),
+        volc_resource_id=os.getenv("ASR_VOLC_RESOURCE_ID"),
+        volc_connect_id_prefix=os.getenv("ASR_VOLC_CONNECT_ID_PREFIX", "dialog-engine"),
+        volc_timeout_seconds=_env_float("ASR_VOLC_TIMEOUT_SECONDS", 15.0),
+        volc_failover_threshold=_env_int("ASR_VOLC_FAILOVER_THRESHOLD", 5),
     )
 
     return Settings(

@@ -10,8 +10,14 @@ except RuntimeError:  # pragma: no cover - optional dependency missing
 except Exception:  # pragma: no cover - defensive guard
     WhisperAsrProvider = None  # type: ignore[assignment]
 
+try:
+    from .volcengine import VolcengineAsrProvider
+except Exception:  # pragma: no cover - provider optional
+    VolcengineAsrProvider = None  # type: ignore[assignment]
+
 __all__ = [
     "AsrProvider",
     "MockAsrProvider",
     "WhisperAsrProvider",
+    "VolcengineAsrProvider",
 ]

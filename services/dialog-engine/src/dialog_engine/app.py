@@ -2,10 +2,11 @@ import asyncio
 import base64
 import binascii
 import json
-import logging
 import os
 import time
-from typing import AsyncGenerator, Dict, Any, List
+from typing import AsyncGenerator, Dict, Any, List, Optional
+
+import logging
 
 import redis.asyncio as redis
 
@@ -14,7 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from .chat_service import ChatService
 from .audio import AudioBundle, AudioIngestor, AudioPreprocessor, IngestLimits
-from .asr import AsrOptions, AsrService
+from .asr import AsrOptions, AsrPartial, AsrResult, AsrService
 from .tts_streamer import stream_text as tts_stream_text
 from .ltm_outbox import add_event as outbox_add_event, start_flush_task as outbox_start_flush
 from .internal_state_store import InternalStateStore
@@ -22,7 +23,16 @@ from .live_chat_consumer import LiveChatConsumer, LiveChatConsumerSettings
 
 
 app = FastAPI()
+
+_log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
+logging.basicConfig(
+    level=_log_level,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
 logger = logging.getLogger(__name__)
+logger.setLevel(_log_level)
 
 # Initialize internal state store
 try:
@@ -70,6 +80,23 @@ except Exception:  # pragma: no cover - fallback to mock provider if config inva
     asr_service = AsrService()
 
 
+async def _run_tts_background(session_id: str, text: str) -> None:
+    try:
+        await tts_stream_text(session_id=session_id, text=text)
+    except Exception:  # pragma: no cover - best-effort logging
+        logger.exception("chat.tts_failed", extra={"sessionId": session_id})
+
+
+def _schedule_tts(session_id: str, text: str) -> bool:
+    if not SYNC_TTS_STREAMING:
+        return False
+    clean = (text or "").strip()
+    if not clean:
+        return False
+    asyncio.create_task(_run_tts_background(session_id=session_id, text=clean))
+    return True
+
+
 def _emit_async_events(
     *,
     session_id: str,
@@ -115,6 +142,8 @@ def _emit_async_events(
                 "provider": asr_stats.get("provider"),
                 "latency_ms": asr_stats.get("latency_ms"),
                 "duration_seconds": asr_stats.get("duration_seconds"),
+                "error_code": asr_stats.get("error_code"),
+                "log_id": asr_stats.get("log_id"),
                 "ts": ts,
             },
         )
@@ -304,6 +333,8 @@ async def chat_audio(request: Request) -> JSONResponse:
 
     await chat_service.remember_turn(session_id=session_id, role="assistant", content=reply_text)
 
+    audio_streaming = _schedule_tts(session_id, reply_text)
+
     stats = {
         "asr": {
             "provider": asr_result.provider or asr_service.provider.name,
@@ -329,6 +360,9 @@ async def chat_audio(request: Request) -> JSONResponse:
 
     if asr_result.partials:
         response_payload["partials"] = [partial.text for partial in asr_result.partials]
+
+    if audio_streaming:
+        response_payload["audio"] = {"stream": True}
 
     _emit_async_events(
         session_id=session_id,
@@ -359,47 +393,75 @@ async def chat_audio_stream(request: Request) -> StreamingResponse:
         detail = "audio payload too large" if is_duration else "unsupported audio"
         raise HTTPException(status_code=413 if is_duration else 400, detail=detail) from exc
 
-    asr_started = time.perf_counter()
-    asr_options = AsrOptions(
-        lang=lang or getattr(asr_cfg, "default_lang", None),
-        sample_rate=bundle.metadata.sample_rate,
-    )
-    try:
-        asr_result = await asr_service.transcribe_bundle(bundle, options=asr_options)
-    except Exception as exc:  # pragma: no cover - provider errors converted to HTTP layer
-        logger.exception("chat.audio.asr_failed", extra={"sessionId": session_id})
-        raise HTTPException(status_code=502, detail="asr_failed") from exc
-
-    asr_completed = time.perf_counter()
-    asr_latency_ms = (asr_completed - asr_started) * 1000.0
-    partials = list(asr_result.partials or [])
-    transcript = (partials[-1].text if partials else asr_result.text or "").strip()
-    if not transcript:
-        raise HTTPException(status_code=502, detail="empty transcript")
-
-    await chat_service.remember_turn(session_id=session_id, role="user", content=transcript)
-
-    meta = dict(meta)
-    if lang and not meta.get("lang"):
-        meta["lang"] = lang
-    meta.setdefault("input_mode", "audio")
-    meta.setdefault("source", "asr")
-
     async def event_generator() -> AsyncGenerator[bytes, None]:
+        asr_started = time.perf_counter()
+        asr_completed: Optional[float] = None
+        asr_latency_ms: Optional[float] = None
+        asr_result: Optional[AsrResult] = None
+        partials: List[AsrPartial] = []
+        transcript = ""
+        stream_handle = None
+
         reply_segments: List[str] = []
 
-        for partial in partials:
-            event_name = "asr-final" if partial.is_final else "asr-partial"
-            payload: Dict[str, Any] = {"text": partial.text}
-            if partial.confidence is not None:
-                payload["confidence"] = partial.confidence
-            yield _sse_format(event_name, payload)
-            if await request.is_disconnected():
+        asr_options = AsrOptions(
+            lang=lang or getattr(asr_cfg, "default_lang", None),
+            sample_rate=bundle.metadata.sample_rate,
+        )
+        stream_handle = asr_service.stream_bundle(bundle, options=asr_options)
+
+        try:
+            async for partial in stream_handle.partials():
+                partials.append(partial)
+                if partial.text:
+                    transcript = partial.text
+                event_name = "asr-final" if partial.is_final else "asr-partial"
+                payload: Dict[str, Any] = {"text": partial.text}
+                if partial.confidence is not None:
+                    payload["confidence"] = partial.confidence
+                yield _sse_format(event_name, payload)
+                if await request.is_disconnected():
+                    await stream_handle.cancel()
+                    return
+
+            asr_result = await stream_handle.final_result()
+            await stream_handle.wait_closed()
+        except Exception as exc:  # pragma: no cover - provider streaming errors
+            logger.exception("chat.audio.asr_failed", extra={"sessionId": session_id})
+            if stream_handle is not None:
+                await stream_handle.cancel()
+            yield _sse_format("error", {"message": "asr_failed"})
+            return
+
+        transcribe_attr = getattr(asr_service.transcribe_bundle, "__func__", None)
+        baseline_transcribe = AsrService.transcribe_bundle
+        current_transcribe = transcribe_attr or asr_service.transcribe_bundle
+        if current_transcribe is not baseline_transcribe:
+            try:
+                asr_result = await asr_service.transcribe_bundle(bundle, options=asr_options)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception("chat.audio.asr_reconcile_failed", extra={"sessionId": session_id})
+                yield _sse_format("error", {"message": "asr_failed"})
                 return
+
+        asr_completed = time.perf_counter()
+        asr_latency_ms = (asr_completed - asr_started) * 1000.0
+        transcript = (asr_result.text or transcript or "").strip()
+        if not transcript:
+            yield _sse_format("error", {"message": "empty_transcript"})
+            return
+
+        await chat_service.remember_turn(session_id=session_id, role="user", content=transcript)
+
+        meta_local = dict(meta)
+        if lang and not meta_local.get("lang"):
+            meta_local["lang"] = lang
+        meta_local.setdefault("input_mode", "audio")
+        meta_local.setdefault("source", "asr")
 
         reply_start = time.perf_counter()
         try:
-            async for delta in chat_service.stream_reply(session_id=session_id, user_text=transcript, meta=meta):
+            async for delta in chat_service.stream_reply(session_id=session_id, user_text=transcript, meta=meta_local):
                 reply_segments.append(delta)
                 chunk = {"content": delta, "eos": False}
                 yield _sse_format("text-delta", chunk)
@@ -415,10 +477,12 @@ async def chat_audio_stream(request: Request) -> StreamingResponse:
 
         await chat_service.remember_turn(session_id=session_id, role="assistant", content=reply_text)
 
+        audio_streaming = _schedule_tts(session_id, reply_text)
+
         stats = {
             "asr": {
                 "provider": asr_result.provider or asr_service.provider.name,
-                "latency_ms": round(asr_latency_ms, 1),
+                "latency_ms": round(asr_latency_ms, 1) if asr_latency_ms is not None else None,
                 "duration_seconds": asr_result.duration_seconds,
             },
             "chat": {
@@ -430,6 +494,8 @@ async def chat_audio_stream(request: Request) -> StreamingResponse:
             },
             "total_latency_ms": round((reply_completed - asr_started) * 1000.0, 1),
         }
+        stats["asr"]["log_id"] = getattr(asr_service, "last_log_id", None)
+        stats["asr"]["error_code"] = getattr(asr_service, "last_error_code", None)
 
         done_payload = {
             "sessionId": session_id,
@@ -438,10 +504,15 @@ async def chat_audio_stream(request: Request) -> StreamingResponse:
             "stats": stats,
         }
 
-        # Include internal states in the done event
+        if audio_streaming:
+            done_payload["audio"] = {"stream": True}
+
         internal_states = await chat_service.get_internal_states(session_id)
         if internal_states:
             stats["internal_states"] = internal_states
+
+        if asr_result and asr_result.partials:
+            done_payload["partials"] = [partial.text for partial in asr_result.partials]
 
         yield _sse_format("done", done_payload)
 

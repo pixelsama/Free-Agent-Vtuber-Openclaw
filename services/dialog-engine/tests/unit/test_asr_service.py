@@ -21,6 +21,13 @@ def _default_asr_settings() -> AsrSettings:
         whisper_compute_type="int8",
         whisper_beam_size=1,
         whisper_cache_dir=None,
+        volc_endpoint=None,
+        volc_app_key=None,
+        volc_access_key=None,
+        volc_resource_id=None,
+        volc_connect_id_prefix=None,
+        volc_timeout_seconds=15.0,
+        volc_failover_threshold=5,
     )
 
 
