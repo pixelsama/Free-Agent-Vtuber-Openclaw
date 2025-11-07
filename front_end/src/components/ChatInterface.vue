@@ -84,6 +84,38 @@
         </v-col>
       </v-row>
     </v-sheet>
+
+    <v-btn
+      class="text-input-fab"
+      color="primary"
+      elevation="6"
+      size="large"
+      icon
+      @click="openTextInputDialog"
+    >
+      <v-icon>mdi-pencil</v-icon>
+    </v-btn>
+
+    <v-dialog v-model="isTextInputDialogOpen" max-width="480">
+      <v-card>
+        <v-card-title class="text-h6">发送文字消息</v-card-title>
+        <v-card-text>
+          <v-textarea
+            v-model="dialogInputText"
+            auto-grow
+            rows="3"
+            counter
+            maxlength="500"
+            :disabled="isProcessing"
+            placeholder="输入想发送的内容..."
+          />
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="closeTextInputDialog">取消</v-btn>
+          <v-btn color="primary" :disabled="isProcessing" @click="submitDialogText">发送</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -100,6 +132,8 @@ const messages = ref([
 const chatListRef = ref(null); // Ref for the message list container
 const streamingUserMessageId = ref(null);
 const streamingAiMessageId = ref(null);
+const isTextInputDialogOpen = ref(false);
+const dialogInputText = ref('');
 
 // --- API Composable ---
 const {
@@ -177,6 +211,30 @@ const toggleRecording = () => {
     // Clear any previous message before starting recording
     newMessage.value = '';
     startRecording();
+  }
+};
+
+const openTextInputDialog = () => {
+  dialogInputText.value = '';
+  isTextInputDialogOpen.value = true;
+};
+
+const closeTextInputDialog = () => {
+  isTextInputDialogOpen.value = false;
+  dialogInputText.value = '';
+};
+
+const submitDialogText = async () => {
+  const text = dialogInputText.value.trim();
+  if (!text) {
+    return;
+  }
+  newMessage.value = text;
+  try {
+    await sendMessage();
+    closeTextInputDialog();
+  } catch (error) {
+    console.error('Dialog text send failed:', error);
   }
 };
 
@@ -320,6 +378,13 @@ onMounted(() => {
     text-align: center;
     font-size: 0.9em;
     padding: 6px 12px;
+}
+
+.text-input-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 10;
 }
 .error-text {
     display: flex;

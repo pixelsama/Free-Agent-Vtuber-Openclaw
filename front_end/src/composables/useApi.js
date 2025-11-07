@@ -1,4 +1,5 @@
 import { ref, shallowRef } from 'vue';
+import { useSubtitleFeed } from './useSubtitleFeed';
 
 // --- Configuration ---
 // 在实际应用中，这些应该来自配置文件或环境变量
@@ -64,6 +65,7 @@ let chunkFlushTimer = null;
 // 使用 shallowRef 以避免深度响应性带来的性能问题，因为 WebSocket 实例不应是深度响应式的
 const inputWs = shallowRef(null);
 const outputWs = shallowRef(null);
+const subtitleFeed = useSubtitleFeed();
 
 const resetStreamingInputState = () => {
   isStreamingAudio.value = false;
@@ -129,6 +131,7 @@ const resetState = () => {
     recordedAudioChunks.value = [];
     recordingError.value = null;
     resetStreamingInputState();
+    subtitleFeed.clearSubtitle();
 };
 
 export function useApi() {
@@ -185,7 +188,7 @@ export function useApi() {
     streamingCongestionWarning.value = false;
   };
 
-  const beginAudioStreamingSession = ({ codec, sampleRate, chunkDurationMs }) => {
+const beginAudioStreamingSession = ({ codec, sampleRate, chunkDurationMs }) => {
     if (!inputWs.value || inputWs.value.readyState !== WebSocket.OPEN) {
       throw new Error('输入 WebSocket 未连接，无法开始音频流。');
     }
@@ -196,6 +199,7 @@ export function useApi() {
       return;
     }
 
+    subtitleFeed.beginStream();
     const startPayload = {
       type: 'audio',
       action: 'start',
@@ -267,7 +271,7 @@ export function useApi() {
 
   // --- Input WebSocket Handling ---
 
-  const connectInput = () => {
+const connectInput = () => {
     // Return a Promise that resolves with the taskId or rejects on error
     return new Promise((resolve, reject) => {
       console.log('Attempting to connect to input WebSocket:', wsInputUrl);
@@ -290,6 +294,7 @@ export function useApi() {
       }
 
       resetState(); // Reset all states before new connection attempt
+      subtitleFeed.clearSubtitle();
 
       inputWs.value = new WebSocket(wsInputUrl);
 
@@ -377,6 +382,7 @@ export function useApi() {
     }
 
     console.log(`Sending text input (task ${taskId.value}):`, text);
+    subtitleFeed.beginStream();
     try {
       // 1. Send metadata JSON
       const metadata = {
@@ -531,6 +537,7 @@ export function useApi() {
           receivedText.value = message.content || '';
           streamingReply.value = '';
           streamingTranscript.value = '';
+          subtitleFeed.replaceText(receivedText.value);
           // If audio is NOT present, processing is fully complete.
           if (!message.audio_present) {
               isProcessing.value = false; // Processing complete
@@ -568,22 +575,25 @@ export function useApi() {
                  const deltaContent = typeof message.content === 'string' ? message.content : '';
                  if (deltaContent) {
                      streamingReply.value += deltaContent;
+                     subtitleFeed.appendDelta(deltaContent);
                  }
-             }
-        } else if (message.status === 'error') {
-          console.error('Output WebSocket error message:', message.error);
-          processingError.value = message.error || '未知处理错误。';
-          isProcessing.value = false;
-          streamingReply.value = '';
-          streamingTranscript.value = '';
-          disconnectOutput();
-        } else {
+            }
+       } else if (message.status === 'error') {
+         console.error('Output WebSocket error message:', message.error);
+         processingError.value = message.error || '未知处理错误。';
+         isProcessing.value = false;
+         streamingReply.value = '';
+         streamingTranscript.value = '';
+         subtitleFeed.clearSubtitle();
+         disconnectOutput();
+       } else {
            console.warn('Received unknown message structure on output WebSocket:', message);
          }
        } catch (e) {
          console.error('Error parsing output WebSocket message:', e);
          processingError.value = '无法解析来自服务器的响应。';
          isProcessing.value = false;
+         subtitleFeed.clearSubtitle();
          disconnectOutput(); // Disconnect on parsing error
        }
      };

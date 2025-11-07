@@ -27,6 +27,13 @@
           :color="isRecording ? 'error' : 'primary'"
           @click="toggleMicrophone"
         ></v-btn>
+        <v-btn
+          class="text-toggle"
+          icon="mdi-pencil"
+          variant="tonal"
+          color="primary"
+          @click="openTextInputDialog"
+        ></v-btn>
         <SubtitleBar :text="subtitleText" />
       </div>
 
@@ -64,6 +71,37 @@
           </v-card-text>
         </v-card>
       </v-dialog>
+
+      <v-dialog v-model="showTextInputDialog" max-width="420">
+        <v-card>
+          <v-card-title class="text-h6">发送文字消息</v-card-title>
+          <v-card-text>
+            <v-textarea
+              v-model="textInputContent"
+              auto-grow
+              rows="3"
+              counter
+              maxlength="400"
+              :disabled="isSendingText"
+              placeholder="输入你想让她说的话..."
+              @keydown.enter.prevent="submitTextInput"
+            />
+            <v-alert
+              v-if="textInputError"
+              type="error"
+              variant="tonal"
+              density="comfortable"
+              class="mt-2"
+            >
+              {{ textInputError }}
+            </v-alert>
+          </v-card-text>
+          <v-card-actions class="justify-end">
+            <v-btn variant="text" @click="closeTextInputDialog" :disabled="isSendingText">取消</v-btn>
+            <v-btn color="primary" :loading="isSendingText" @click="submitTextInput">发送</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
     </v-main>
   </v-app>
 </template>
@@ -75,6 +113,7 @@ import Live2DControls from './components/Live2DControls.vue';
 import SubtitleBar from './components/SubtitleBar.vue';
 import { useApi } from './composables/useApi';
 import { useStreamingChat } from './composables/useStreamingChat';
+import { useSubtitleFeed } from './composables/useSubtitleFeed';
 
 const live2dViewer = ref(null);
 const modelLoaded = ref(false);
@@ -82,28 +121,28 @@ const currentModelPath = ref('/src/live2d/models/Haru/Haru.model3.json');
 const showConfigPanel = ref(false);
 const motions = ref([]);
 const expressions = ref([]);
-const subtitleText = ref('');
+const { subtitleText, appendDelta, replaceText, clearSubtitle, beginStream } = useSubtitleFeed();
 const viewerWidth = ref(400);
 const viewerHeight = ref(600);
+const showTextInputDialog = ref(false);
+const textInputContent = ref('');
+const textInputError = ref('');
+const isSendingText = ref(false);
 
 const { receivedAudioUrl, isRecording, startRecording, stopRecording, recordingError } = useApi();
 const { startStreaming, cancelStreaming, onDelta, onDone, onError } = useStreamingChat();
 
 const detachDelta = onDelta((delta) => {
-  if (!delta) return;
-  subtitleText.value += delta;
+  appendDelta(delta);
 });
 
-const clearSubtitle = () => {
-  subtitleText.value = '';
-};
-
 const detachDone = onDone(() => {
-  // 保留钩子以便后续扩展，例如记录完成信息
+  replaceText(subtitleText.value);
 });
 
 const detachError = onError((error) => {
   console.error('字幕流式输出发生错误:', error);
+  clearSubtitle();
 });
 
 const handleModelLoaded = (model) => {
@@ -172,9 +211,42 @@ watch(recordingError, (error) => {
   }
 });
 
+const openTextInputDialog = () => {
+  textInputContent.value = '';
+  textInputError.value = '';
+  showTextInputDialog.value = true;
+};
+
+const closeTextInputDialog = () => {
+  if (isSendingText.value) return;
+  showTextInputDialog.value = false;
+  textInputContent.value = '';
+  textInputError.value = '';
+};
+
+const submitTextInput = async () => {
+  const content = textInputContent.value.trim();
+  if (!content) {
+    textInputError.value = '请输入要发送的内容。';
+    return;
+  }
+  textInputError.value = '';
+  isSendingText.value = true;
+  try {
+    await sendUserText(content, { sessionId: 'text-dialog' });
+    showTextInputDialog.value = false;
+    textInputContent.value = '';
+  } catch (error) {
+    console.error('发送文字消息失败:', error);
+    textInputError.value = '发送失败，请稍后重试。';
+  } finally {
+    isSendingText.value = false;
+  }
+};
+
 const sendUserText = async (content, options = {}) => {
   if (!content) return;
-  clearSubtitle();
+  beginStream();
   await startStreaming(options.sessionId || 'default', content, options.payload);
 };
 
@@ -241,6 +313,13 @@ defineExpose({
   top: 20px;
   right: 80px;
   z-index: 5;
+}
+
+.text-toggle {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  z-index: 6;
 }
 
 .config-dialog {
