@@ -316,7 +316,10 @@ class OutputHandler:
         if not ws:
             return
         try:
-            await ws.send_text(json.dumps({"type": "control", "action": action, "task_id": session_id}))
+            payload = {"type": "control", "action": action, "task_id": session_id}
+            await ws.send_text(json.dumps(payload))
+            if action.upper() == "END":
+                await ws.send_text(json.dumps({"type": "audio_complete", "task_id": session_id}))
         except Exception:
             pass
 

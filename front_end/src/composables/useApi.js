@@ -30,7 +30,7 @@ const streamingTranscript = ref(''); // 实时 ASR 文本
 const streamingReply = ref(''); // 实时回复片段
 // Audio related state
 const audioChunks = shallowRef([]); // Store received audio binary chunks
-const expectedAudioChunks = ref(0);
+const expectedAudioChunks = ref(0); // -1 indicates streaming/unknown length
 const receivedAudioChunkCount = ref(0);
 const lastReceivedAudioChunkId = ref(-1); // Track the ID for the next expected binary chunk
 const receivedAudioUrl = ref(null); // URL for the final reassembled audio
@@ -49,6 +49,7 @@ const STREAMING_CHUNK_INTERVAL_MS = 250;
 const WS_BUFFER_THRESHOLD_BYTES = 512 * 1024;
 const MAX_PENDING_CHUNKS = 20;
 const MAX_PENDING_BYTES = 5 * 1024 * 1024;
+const STREAMING_UNKNOWN_CHUNKS = -1;
 const AUDIO_MIME_CANDIDATES = [
   'audio/webm;codecs=opus',
   'audio/webm',
@@ -420,34 +421,44 @@ const connectInput = () => {
 
   // --- Audio Reassembly ---
   const reassembleAndHandleAudio = () => {
-      if (receivedAudioChunkCount.value !== expectedAudioChunks.value || audioChunks.value.length !== expectedAudioChunks.value) {
-          console.error(`Audio reassembly error: Expected ${expectedAudioChunks.value} chunks, received ${receivedAudioChunkCount.value}. Array length: ${audioChunks.value.length}`);
-          processingError.value = "音频数据接收不完整。";
-          resetAudioState();
+      if (expectedAudioChunks.value === 0 && audioChunks.value.length === 0) {
+          console.log("No audio chunks were expected or received.");
           return;
       }
-      if (expectedAudioChunks.value === 0) {
-          console.log("No audio chunks were expected or received.");
-          return; // Nothing to reassemble
+
+      const isStreaming = expectedAudioChunks.value === STREAMING_UNKNOWN_CHUNKS;
+      if (!isStreaming) {
+          if (
+              expectedAudioChunks.value <= 0 ||
+              receivedAudioChunkCount.value !== expectedAudioChunks.value ||
+              audioChunks.value.length !== expectedAudioChunks.value
+          ) {
+              console.error(
+                  `Audio reassembly error: Expected ${expectedAudioChunks.value} chunks, received ${receivedAudioChunkCount.value}. Array length: ${audioChunks.value.length}`,
+              );
+              processingError.value = "音频数据接收不完整。";
+              resetAudioState();
+              return;
+          }
       }
 
       try {
-          console.log("Reassembling audio from", audioChunks.value.length, "chunks...");
-          // Ensure all chunks are valid before creating blob
-          const validChunks = audioChunks.value.filter(chunk => chunk instanceof Blob || chunk instanceof ArrayBuffer);
-          if (validChunks.length !== expectedAudioChunks.value) {
-              throw new Error("Some received audio chunks are invalid.");
+          const chunks = Array.isArray(audioChunks.value) ? audioChunks.value : [];
+          console.log("Reassembling audio from", chunks.length, "chunks...");
+          const normalized = chunks
+              .filter((chunk) => chunk instanceof Blob || chunk instanceof ArrayBuffer)
+              .map((chunk) => (chunk instanceof Blob ? chunk : new Blob([chunk])));
+          if (!normalized.length) {
+              throw new Error("No valid audio chunks to assemble.");
           }
 
-          // 确认 MP3 为统一输出格式
-          const completeAudioBlob = new Blob(validChunks, { type: 'audio/mpeg' });
-          console.log("Audio reassembled successfully. Blob size:", completeAudioBlob.size);
+          const mimeType = isStreaming ? 'audio/wav' : 'audio/mpeg';
+          const completeAudioBlob = new Blob(normalized, { type: mimeType });
+          console.log("Audio reassembled successfully. Blob size:", completeAudioBlob.size, 'type:', mimeType);
 
-          // Clean up previous URL if exists
           if (receivedAudioUrl.value) {
               URL.revokeObjectURL(receivedAudioUrl.value);
           }
-          // Create Object URL for playback
           receivedAudioUrl.value = URL.createObjectURL(completeAudioBlob);
           console.log("Created audio object URL:", receivedAudioUrl.value);
 
@@ -455,7 +466,6 @@ const connectInput = () => {
           console.error("Error reassembling audio:", error);
           processingError.value = "处理接收到的音频时出错。";
       } finally {
-          // Reset audio chunk state after processing
           resetAudioState();
       }
   };
@@ -506,24 +516,32 @@ const connectInput = () => {
        // --- Handle Binary Data First (Audio Chunk) ---
        if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
            console.log(`Received binary audio data chunk (expecting ID ${lastReceivedAudioChunkId.value}).`);
-           if (lastReceivedAudioChunkId.value !== -1 && lastReceivedAudioChunkId.value < expectedAudioChunks.value) {
-               // Store the received chunk
-               // Make sure the array is initialized
-               if (audioChunks.value.length !== expectedAudioChunks.value && expectedAudioChunks.value > 0) {
-                   console.warn(`Audio chunk array not initialized correctly. Expected ${expectedAudioChunks.value}, got ${audioChunks.value.length}. Reinitializing.`);
-                   audioChunks.value = new Array(expectedAudioChunks.value);
-               }
-               if (lastReceivedAudioChunkId.value < audioChunks.value.length) {
-                    audioChunks.value[lastReceivedAudioChunkId.value] = event.data; // Use Blob directly
-                    receivedAudioChunkCount.value++;
-                    console.log(`Stored audio chunk ${lastReceivedAudioChunkId.value}. Received ${receivedAudioChunkCount.value}/${expectedAudioChunks.value}`);
+           const expectingStreaming = expectedAudioChunks.value === STREAMING_UNKNOWN_CHUNKS;
+           if (lastReceivedAudioChunkId.value !== -1) {
+               if (expectingStreaming) {
+                   if (!Array.isArray(audioChunks.value)) {
+                       audioChunks.value = [];
+                   }
+                   audioChunks.value.push(event.data);
+                   receivedAudioChunkCount.value++;
+                   console.log(`Stored streaming audio chunk ${receivedAudioChunkCount.value}`);
+               } else if (expectedAudioChunks.value > 0 && lastReceivedAudioChunkId.value < expectedAudioChunks.value) {
+                   if (audioChunks.value.length !== expectedAudioChunks.value) {
+                       console.warn(`Audio chunk array not initialized correctly. Expected ${expectedAudioChunks.value}, got ${audioChunks.value.length}. Reinitializing.`);
+                       audioChunks.value = new Array(expectedAudioChunks.value);
+                   }
+                   audioChunks.value[lastReceivedAudioChunkId.value] = event.data;
+                   receivedAudioChunkCount.value++;
+                   console.log(`Stored audio chunk ${lastReceivedAudioChunkId.value}. Received ${receivedAudioChunkCount.value}/${expectedAudioChunks.value}`);
                } else {
-                    console.error(`Received audio chunk with invalid index: ${lastReceivedAudioChunkId.value}`);
-                    // Handle error? Maybe disconnect?
+                   console.warn('Received binary audio chunk but allocation is not ready.', {
+                       idx: lastReceivedAudioChunkId.value,
+                       expected: expectedAudioChunks.value,
+                   });
                }
-               lastReceivedAudioChunkId.value = -1; // Reset, wait for next metadata chunk
+               lastReceivedAudioChunkId.value = -1;
            } else {
-               console.warn("Received unexpected binary data when not expecting audio chunk ID:", lastReceivedAudioChunkId.value);
+               console.warn('Received unexpected binary data when not expecting audio chunk ID:', lastReceivedAudioChunkId.value);
            }
            return; // Processed binary data, exit handler
        }
@@ -550,10 +568,18 @@ const connectInput = () => {
            }
          } else if (message.type === 'audio_chunk' && message.task_id === currentTaskId) {
              console.log(`Received audio chunk metadata: ID ${message.chunk_id}/${message.total_chunks}`);
-             if (message.chunk_id === 0) { // First chunk metadata
-                 expectedAudioChunks.value = message.total_chunks || 0;
-                 audioChunks.value = new Array(expectedAudioChunks.value); // Initialize array
-                 receivedAudioChunkCount.value = 0; // Reset count
+             if (message.chunk_id === 0 || expectedAudioChunks.value === 0) {
+                 const total = typeof message.total_chunks === 'number' ? message.total_chunks : 0;
+                 if (total > 0) {
+                     expectedAudioChunks.value = total;
+                     audioChunks.value = new Array(total);
+                 } else {
+                     expectedAudioChunks.value = STREAMING_UNKNOWN_CHUNKS;
+                     audioChunks.value = [];
+                 }
+                 receivedAudioChunkCount.value = 0;
+             } else if (expectedAudioChunks.value === STREAMING_UNKNOWN_CHUNKS && !Array.isArray(audioChunks.value)) {
+                 audioChunks.value = [];
              }
              // Verify chunk_id continuity if needed
              lastReceivedAudioChunkId.value = message.chunk_id; // Set expectation for next binary msg
@@ -562,6 +588,14 @@ const connectInput = () => {
              isProcessing.value = false; // All processing is now complete
              reassembleAndHandleAudio(); // Process the collected chunks
              disconnectOutput(); // Disconnect after processing audio
+         } else if (message.type === 'control' && message.task_id === currentTaskId) {
+             const action = typeof message.action === 'string' ? message.action.toUpperCase() : '';
+             if (action === 'END') {
+                 console.log('Received control END signal for audio stream.');
+                 isProcessing.value = false;
+                 reassembleAndHandleAudio();
+                 disconnectOutput();
+             }
          } else if (message.status === 'streaming' && message.task_id === currentTaskId) {
              const eventType = message.event;
              if (eventType === 'asr-partial' || eventType === 'asr-final') {

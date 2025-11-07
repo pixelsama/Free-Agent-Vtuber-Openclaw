@@ -317,6 +317,8 @@ class InputHandler:
                     }
                     if "partials" in data:
                         response_payload["partials"] = data["partials"]
+                    if "audio" in data:
+                        response_payload["audio"] = data["audio"]
                     await self._publish_response(task_id, response_payload)
                     return
                 if event_name == "error":

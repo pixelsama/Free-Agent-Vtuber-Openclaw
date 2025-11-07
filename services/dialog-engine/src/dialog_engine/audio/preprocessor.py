@@ -11,6 +11,11 @@ except Exception:  # pragma: no cover
     np = None  # type: ignore[assignment]
 
 try:  # pragma: no cover - optional dependency guard
+    import soundfile as sf  # noqa: F401 - imported for monkeypatching in tests
+except Exception:  # pragma: no cover
+    sf = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency guard
     import resampy
 except Exception:  # pragma: no cover
     resampy = None  # type: ignore[assignment]

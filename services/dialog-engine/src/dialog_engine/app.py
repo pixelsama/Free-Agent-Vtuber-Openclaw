@@ -79,6 +79,23 @@ except Exception:  # pragma: no cover - fallback to mock provider if config inva
     asr_service = AsrService()
 
 
+async def _run_tts_background(session_id: str, text: str) -> None:
+    try:
+        await tts_stream_text(session_id=session_id, text=text)
+    except Exception:  # pragma: no cover - best-effort logging
+        logger.exception("chat.tts_failed", extra={"sessionId": session_id})
+
+
+def _schedule_tts(session_id: str, text: str) -> bool:
+    if not SYNC_TTS_STREAMING:
+        return False
+    clean = (text or "").strip()
+    if not clean:
+        return False
+    asyncio.create_task(_run_tts_background(session_id=session_id, text=clean))
+    return True
+
+
 def _emit_async_events(
     *,
     session_id: str,
@@ -315,6 +332,8 @@ async def chat_audio(request: Request) -> JSONResponse:
 
     await chat_service.remember_turn(session_id=session_id, role="assistant", content=reply_text)
 
+    audio_streaming = _schedule_tts(session_id, reply_text)
+
     stats = {
         "asr": {
             "provider": asr_result.provider or asr_service.provider.name,
@@ -340,6 +359,9 @@ async def chat_audio(request: Request) -> JSONResponse:
 
     if asr_result.partials:
         response_payload["partials"] = [partial.text for partial in asr_result.partials]
+
+    if audio_streaming:
+        response_payload["audio"] = {"stream": True}
 
     _emit_async_events(
         session_id=session_id,
@@ -454,6 +476,8 @@ async def chat_audio_stream(request: Request) -> StreamingResponse:
 
         await chat_service.remember_turn(session_id=session_id, role="assistant", content=reply_text)
 
+        audio_streaming = _schedule_tts(session_id, reply_text)
+
         stats = {
             "asr": {
                 "provider": asr_result.provider or asr_service.provider.name,
@@ -478,6 +502,9 @@ async def chat_audio_stream(request: Request) -> StreamingResponse:
             "reply": reply_text,
             "stats": stats,
         }
+
+        if audio_streaming:
+            done_payload["audio"] = {"stream": True}
 
         internal_states = await chat_service.get_internal_states(session_id)
         if internal_states:

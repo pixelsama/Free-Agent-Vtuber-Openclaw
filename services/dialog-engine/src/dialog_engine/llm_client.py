@@ -3,6 +3,7 @@ from __future__ import annotations
 """LLM streaming client wrappers for dialog-engine."""
 
 import asyncio
+import inspect
 import logging
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any, Dict, Optional
@@ -171,13 +172,34 @@ class OpenAIChatClient:
             finally:
                 if stream is not None:
                     try:
-                        await stream.aclose()
+                        await self._close_stream(stream)
                     except Exception:  # pragma: no cover - best effort cleanup
                         logger.debug("llm.stream.close_failed", exc_info=True)
 
         if isinstance(last_error, LLMStreamEmptyError):
             raise last_error
         raise RuntimeError("LLM streaming failed after retries") from last_error
+
+    async def _close_stream(self, stream: Any) -> None:
+        """Best-effort closer compatible with multiple OpenAI SDK versions."""
+
+        if stream is None:
+            return
+
+        close_candidate = getattr(stream, "aclose", None) or getattr(stream, "close", None)
+        if close_candidate:
+            result = close_candidate()
+            if inspect.isawaitable(result):
+                await result
+            return
+
+        response = getattr(stream, "response", None)
+        if response is not None:
+            close_candidate = getattr(response, "aclose", None) or getattr(response, "close", None)
+            if close_candidate:
+                result = close_candidate()
+                if inspect.isawaitable(result):
+                    await result
 
     async def generate_vision_reply(
         self,
