@@ -29,7 +29,7 @@ function getPointerPosition(event, rect) {
 
 const Live2DViewer = forwardRef(function Live2DViewer(
   {
-    modelPath = '/src/live2d/models/Haru/Haru.model3.json',
+    modelPath = '/live2d/models/Haru/Haru.model3.json',
     width = 400,
     height = 600,
     motions = [],

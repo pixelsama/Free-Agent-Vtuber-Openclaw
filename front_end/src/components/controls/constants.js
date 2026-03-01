@@ -6,7 +6,7 @@ export const STORAGE_KEYS = {
   presetConfigs: 'live2d-preset-configs',
 };
 
-export const DEFAULT_MODEL_PATH = '/src/live2d/models/Haru/Haru.model3.json';
+export const DEFAULT_MODEL_PATH = '/live2d/models/Haru/Haru.model3.json';
 
 export const DEFAULT_MOTIONS = [
   { id: 'm01', name: '待机', group: 'Idle', index: 0, filePath: null, fileName: null, clickAreas: [] },
@@ -41,31 +41,31 @@ export const DEFAULT_EXPRESSIONS = [
 export const AVAILABLE_MODELS = [
   {
     name: 'Haru',
-    path: '/src/live2d/models/Haru/Haru.model3.json',
+    path: '/live2d/models/Haru/Haru.model3.json',
   },
   {
     name: 'Hiyori',
-    path: '/src/live2d/models/Hiyori/Hiyori.model3.json',
+    path: '/live2d/models/Hiyori/Hiyori.model3.json',
   },
   {
     name: 'Mao',
-    path: '/src/live2d/models/Mao/Mao.model3.json',
+    path: '/live2d/models/Mao/Mao.model3.json',
   },
   {
     name: 'Mark',
-    path: '/src/live2d/models/Mark/Mark.model3.json',
+    path: '/live2d/models/Mark/Mark.model3.json',
   },
   {
     name: 'Natori',
-    path: '/src/live2d/models/Natori/Natori.model3.json',
+    path: '/live2d/models/Natori/Natori.model3.json',
   },
   {
     name: 'Rice',
-    path: '/src/live2d/models/Rice/Rice.model3.json',
+    path: '/live2d/models/Rice/Rice.model3.json',
   },
   {
     name: 'Wanko',
-    path: '/src/live2d/models/Wanko/Wanko.model3.json',
+    path: '/live2d/models/Wanko/Wanko.model3.json',
   },
 ];
 

@@ -20,7 +20,7 @@ import SubtitleBar from './components/subtitle/SubtitleBar.jsx';
 import { useStreamingChat } from './hooks/useStreamingChat.js';
 import { useSubtitleFeed } from './hooks/useSubtitleFeed.js';
 
-const DEFAULT_MODEL = '/src/live2d/models/Haru/Haru.model3.json';
+const DEFAULT_MODEL = '/live2d/models/Haru/Haru.model3.json';
 
 export default function App() {
   const live2dViewerRef = useRef(null);

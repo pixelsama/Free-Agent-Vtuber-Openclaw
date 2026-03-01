@@ -1,48 +1,41 @@
-# 前端本地开发指南
+# 前端本地开发（OpenClaw 文本版）
 
-前端已从Docker化部署中移除，现在只能在本地运行。
+该副本前端当前是文本链路：
+- 使用 `POST /chat/stream` 获取流式字幕
+- 语音入口已禁用（Phase 1 不接 TTS/ASR）
 
 ## 环境要求
+- Node.js 18+
+- npm
 
-- Node.js (推荐版本 16+)
-- npm 或 yarn
-
-## 安装依赖
+## 安装与启动
 
 ```bash
 cd front_end
 npm install
-```
-
-## 本地开发
-
-启动开发服务器（支持热重载）：
-
-```bash
 npm run dev
 ```
 
-默认运行在 http://localhost:3000
+默认地址：`http://localhost:3000`
 
-## 生产构建
+## Live2D 模型放置目录（推荐）
 
-构建生产版本：
+请将模型资源放到：
 
-```bash
-npm run build
-```
+`front_end/public/live2d/models/<ModelName>/`
 
-预览生产构建：
+并在前端使用路径：
 
-```bash
-npm run preview
-```
+`/live2d/models/<ModelName>/<ModelName>.model3.json`
 
-## 注意事项
+这样在 `npm run dev` 与 `npm run build` 后的生产静态部署都能一致访问，避免 `src/` 路径在构建后失效。
 
-- 确保后端服务正在运行（通过 Docker Compose 启动网关与各微服务）
-- 前端仅使用双 WebSocket 与后端通信（不再通过 HTTP 拉取 TTS）
-  - 输入 WS：ws://localhost:8000/ws/input
-  - 输出 WS：ws://localhost:8000/ws/output/{task_id}
-- 音频输出采用 MP3（MIME: audio/mpeg），前端按分块重组后直接播放
-- 开发时修改代码会自动热重载
+## 环境变量
+
+参考 `front_end/.env.example`：
+- `VITE_API_BASE_URL=http://127.0.0.1:8000`
+- `VITE_STREAM_PATH=chat/stream`
+
+## 联调要求
+
+先启动网关（`docker compose up gateway` 或单独运行 `services/gateway-python/main.py`），并确保网关可访问到用户部署的 OpenClaw。
