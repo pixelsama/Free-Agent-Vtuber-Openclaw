@@ -121,7 +121,8 @@ export default function App() {
 
   const stageStyle = useMemo(
     () => ({
-      minHeight: '100vh',
+      height: '100dvh',
+      minHeight: '100dvh',
       background:
         'radial-gradient(circle at top, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.06)), linear-gradient(180deg, #e5eeff 0%, #f9fbff 100%)',
     }),

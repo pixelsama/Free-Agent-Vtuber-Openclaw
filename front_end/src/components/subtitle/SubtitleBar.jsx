@@ -4,6 +4,7 @@ import './SubtitleBar.css';
 export default function SubtitleBar({ text = '', autoHideDelay = 5000 }) {
   const [visible, setVisible] = useState(false);
   const hideTimerRef = useRef(null);
+  const normalizedText = typeof text === 'string' ? text.trim() : '';
 
   useEffect(() => {
     if (hideTimerRef.current) {
@@ -11,7 +12,7 @@ export default function SubtitleBar({ text = '', autoHideDelay = 5000 }) {
       hideTimerRef.current = null;
     }
 
-    if (text) {
+    if (normalizedText) {
       setVisible(true);
       hideTimerRef.current = setTimeout(() => {
         setVisible(false);
@@ -26,11 +27,11 @@ export default function SubtitleBar({ text = '', autoHideDelay = 5000 }) {
         hideTimerRef.current = null;
       }
     };
-  }, [text, autoHideDelay]);
+  }, [normalizedText, autoHideDelay]);
 
   return (
     <div className={`subtitle-container ${visible ? 'visible' : 'hidden'}`}>
-      <span className="subtitle-text">{text}</span>
+      <span className="subtitle-text">{normalizedText}</span>
     </div>
   );
 }
