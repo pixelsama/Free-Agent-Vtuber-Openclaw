@@ -1,0 +1,43 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.live2d-stage {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.live2d-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.config-toggle {
+  position: absolute !important;
+  top: 20px;
+  right: 20px;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.85) !important;
+}
+
+.text-toggle {
+  position: absolute !important;
+  right: 24px;
+  bottom: 24px;
+  z-index: 6;
+  background: rgba(255, 255, 255, 0.85) !important;
+}
