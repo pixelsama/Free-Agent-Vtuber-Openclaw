@@ -18,6 +18,7 @@ export default function ExpressionPanel({
   modelLoaded,
   expressions,
   availableExpressionFiles,
+  isParsingModelFiles,
   manualExpressionFiles,
   onManualExpressionFilesChange,
   onParseManualExpressionFiles,
@@ -43,17 +44,17 @@ export default function ExpressionPanel({
       <AccordionDetails>
         <Stack spacing={2}>
           <TextField
-            label="手动输入表情文件名"
+            label="手动输入表情文件名（可选）"
             value={manualExpressionFiles}
             onChange={(event) => onManualExpressionFilesChange(event.target.value)}
             multiline
             minRows={3}
-            placeholder={'每行一个文件名，例如:\nsmile_01\nangry_01'}
+            placeholder={'留空可自动解析 model3.json；或每行一个文件名，例如:\nsmile_01\nangry_01'}
             size="small"
             fullWidth
           />
-          <Button variant="outlined" onClick={onParseManualExpressionFiles}>
-            解析文件名
+          <Button variant="outlined" onClick={onParseManualExpressionFiles} disabled={isParsingModelFiles}>
+            {isParsingModelFiles ? '解析中...' : '自动解析（model3.json）/手动解析'}
           </Button>
 
           {availableExpressionFiles.length > 0 && (

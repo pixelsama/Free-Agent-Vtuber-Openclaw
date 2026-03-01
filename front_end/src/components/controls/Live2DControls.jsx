@@ -143,6 +143,134 @@ function parseManualFiles(text, suffix, basePath) {
   });
 }
 
+function normalizeAssetPath(baseDir, filePath) {
+  if (typeof filePath !== 'string' || !filePath.trim()) {
+    return null;
+  }
+
+  const trimmedPath = filePath.trim();
+  if (/^(https?:)?\/\//.test(trimmedPath) || trimmedPath.startsWith('/')) {
+    return trimmedPath;
+  }
+
+  return `${baseDir}/${trimmedPath}`.replace(/\/+/g, '/');
+}
+
+function extractFileName(filePath) {
+  if (typeof filePath !== 'string' || !filePath) {
+    return '';
+  }
+
+  const parts = filePath.split('/');
+  return parts[parts.length - 1] || '';
+}
+
+function stripFileSuffix(name, suffix) {
+  if (!name) {
+    return '';
+  }
+
+  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+}
+
+function parseModelFileReferences(modelPath, modelJson) {
+  const modelDir = parseModelDir(modelPath);
+  const fileRefs = modelJson?.FileReferences || {};
+
+  const motionFiles = [];
+  const motionGroups = fileRefs?.Motions;
+  if (motionGroups && typeof motionGroups === 'object') {
+    Object.entries(motionGroups).forEach(([group, items]) => {
+      if (!Array.isArray(items)) {
+        return;
+      }
+
+      items.forEach((motion, index) => {
+        const fileRefPath = motion?.File;
+        const normalizedPath = normalizeAssetPath(modelDir, fileRefPath);
+        const fileName = extractFileName(fileRefPath);
+        if (!normalizedPath || !fileName) {
+          return;
+        }
+
+        motionFiles.push({
+          group,
+          index,
+          fileName,
+          path: normalizedPath,
+          name: stripFileSuffix(fileName, '.motion3.json') || `${group}_${index + 1}`,
+        });
+      });
+    });
+  }
+
+  const expressionFiles = [];
+  const expressionRefs = Array.isArray(fileRefs?.Expressions) ? fileRefs.Expressions : [];
+  expressionRefs.forEach((expressionRef, index) => {
+    const fileRefPath = expressionRef?.File;
+    const normalizedPath = normalizeAssetPath(modelDir, fileRefPath);
+    const fileName = extractFileName(fileRefPath);
+    if (!normalizedPath || !fileName) {
+      return;
+    }
+
+    expressionFiles.push({
+      index,
+      fileName,
+      path: normalizedPath,
+      name:
+        expressionRef?.Name || stripFileSuffix(fileName, '.exp3.json') || `Expression_${index + 1}`,
+    });
+  });
+
+  return {
+    motionFiles,
+    expressionFiles,
+  };
+}
+
+function buildMotionsFromModelReferences(parsedMotionFiles, previousMotions) {
+  const previousByFile = new Map(
+    previousMotions
+      .filter((motion) => motion?.fileName)
+      .map((motion) => [motion.fileName, motion]),
+  );
+
+  return parsedMotionFiles.map((file, index) => {
+    const previous = previousByFile.get(file.fileName);
+    return {
+      id: `m${String(index + 1).padStart(2, '0')}`,
+      name: file.name,
+      group: file.group || 'Idle',
+      index: typeof file.index === 'number' ? file.index : 0,
+      filePath: file.path,
+      fileName: file.fileName,
+      fileObject: null,
+      clickAreas: Array.isArray(previous?.clickAreas) ? previous.clickAreas : [],
+    };
+  });
+}
+
+function buildExpressionsFromModelReferences(parsedExpressionFiles, previousExpressions) {
+  const previousByFile = new Map(
+    previousExpressions
+      .filter((expression) => expression?.fileName)
+      .map((expression) => [expression.fileName, expression]),
+  );
+
+  return parsedExpressionFiles.map((file, index) => {
+    const previous = previousByFile.get(file.fileName);
+    return {
+      id: `f${String(index + 1).padStart(2, '0')}`,
+      name: file.name,
+      filePath: file.path,
+      fileName: file.fileName,
+      fileObject: null,
+      clickAreas: Array.isArray(previous?.clickAreas) ? previous.clickAreas : [],
+    };
+  });
+}
+
 function normalizeModelScale(scale) {
   const rounded = Math.round(scale * 10) / 10;
   return Math.max(0.1, Math.min(3, rounded));
@@ -176,6 +304,7 @@ export default function Live2DControls({
   const [manualExpressionFiles, setManualExpressionFiles] = useState('');
   const [availableExpressionFiles, setAvailableExpressionFiles] = useState([]);
   const [newExpressionName, setNewExpressionName] = useState('');
+  const [isParsingModelFiles, setIsParsingModelFiles] = useState(false);
 
   const [backgroundImage, setBackgroundImage] = useState(null);
   const [backgroundOpacity, setBackgroundOpacity] = useState(1);
@@ -198,6 +327,7 @@ export default function Live2DControls({
   const presetFileInputRef = useRef(null);
   const motionsRef = useRef(motions);
   const expressionsRef = useRef(expressions);
+  const parseRequestRef = useRef(0);
 
   useEffect(() => {
     motionsRef.current = motions;
@@ -275,39 +405,72 @@ export default function Live2DControls({
     setAvailableClickAreas(DEFAULT_CLICK_AREAS);
   }, [getManager]);
 
-  const clearModelFileAssociations = useCallback(() => {
-    setMotions((prev) => {
-      const next = prev.map((motion) => {
-        revokeIfBlob(motion.filePath);
-        return {
-          ...motion,
-          filePath: null,
-          fileName: null,
-          fileObject: null,
-        };
-      });
-      saveMotionConfig(next);
-      return next;
-    });
+  const autoParseModelFiles = useCallback(
+    async (modelPath) => {
+      if (!modelPath) {
+        return;
+      }
 
-    setExpressions((prev) => {
-      const next = prev.map((expression) => {
-        revokeIfBlob(expression.filePath);
-        return {
-          ...expression,
-          filePath: null,
-          fileName: null,
-          fileObject: null,
-        };
-      });
-      saveExpressionConfig(next);
-      return next;
-    });
+      const requestId = parseRequestRef.current + 1;
+      parseRequestRef.current = requestId;
+      setIsParsingModelFiles(true);
 
-    setAvailableMotionFiles([]);
-    setAvailableExpressionFiles([]);
-    updateDebugInfo('已清理旧模型的文件关联');
-  }, [saveExpressionConfig, saveMotionConfig, updateDebugInfo]);
+      try {
+        const response = await fetch(modelPath, { cache: 'no-cache' });
+        if (!response.ok) {
+          throw new Error(`无法读取模型配置（${response.status} ${response.statusText}）`);
+        }
+
+        const modelJson = await response.json();
+        const { motionFiles, expressionFiles } = parseModelFileReferences(modelPath, modelJson);
+
+        if (parseRequestRef.current !== requestId) {
+          return;
+        }
+
+        motionsRef.current.forEach((motion) => revokeIfBlob(motion.filePath));
+        expressionsRef.current.forEach((expression) => revokeIfBlob(expression.filePath));
+
+        const nextMotions = buildMotionsFromModelReferences(motionFiles, motionsRef.current);
+        const nextExpressions = buildExpressionsFromModelReferences(
+          expressionFiles,
+          expressionsRef.current,
+        );
+
+        const finalMotions =
+          nextMotions.length > 0 ? nextMotions : DEFAULT_MOTIONS.map((item) => ({ ...item }));
+        const finalExpressions =
+          nextExpressions.length > 0
+            ? nextExpressions
+            : DEFAULT_EXPRESSIONS.map((item) => ({ ...item }));
+
+        setAvailableMotionFiles(motionFiles);
+        setAvailableExpressionFiles(expressionFiles);
+
+        setMotions(finalMotions);
+        saveMotionConfig(finalMotions);
+        setExpressions(finalExpressions);
+        saveExpressionConfig(finalExpressions);
+
+        updateDebugInfo(
+          `已从 model3.json 自动解析：${motionFiles.length} 个动作，${expressionFiles.length} 个表情`,
+        );
+      } catch (error) {
+        if (parseRequestRef.current !== requestId) {
+          return;
+        }
+
+        setAvailableMotionFiles([]);
+        setAvailableExpressionFiles([]);
+        updateDebugInfo(`自动解析 model3.json 失败: ${error.message}`);
+      } finally {
+        if (parseRequestRef.current === requestId) {
+          setIsParsingModelFiles(false);
+        }
+      }
+    },
+    [saveExpressionConfig, saveMotionConfig, updateDebugInfo],
+  );
 
   useEffect(() => {
     if (isHydrated) {
@@ -328,8 +491,10 @@ export default function Live2DControls({
       onExpressionsUpdate?.(mergedExpressions);
 
       const storedModel = JSON.parse(localStorage.getItem(STORAGE_KEYS.modelConfig) || '{}');
+      let initialModelPath = DEFAULT_MODEL_PATH;
       if (typeof storedModel.selectedModel === 'string' && storedModel.selectedModel) {
-        setSelectedModel(storedModel.selectedModel);
+        initialModelPath = storedModel.selectedModel;
+        setSelectedModel(initialModelPath);
         if (storedModel.selectedModel !== DEFAULT_MODEL_PATH) {
           onModelChange?.(storedModel.selectedModel);
         }
@@ -358,12 +523,20 @@ export default function Live2DControls({
       }
 
       loadSavedPresets();
+      void autoParseModelFiles(initialModelPath);
     } catch (error) {
       console.error('Failed to restore state from localStorage:', error);
     } finally {
       setIsHydrated(true);
     }
-  }, [isHydrated, loadSavedPresets, onExpressionsUpdate, onModelChange, onMotionsUpdate]);
+  }, [
+    autoParseModelFiles,
+    isHydrated,
+    loadSavedPresets,
+    onExpressionsUpdate,
+    onModelChange,
+    onMotionsUpdate,
+  ]);
 
   useEffect(() => {
     if (!isHydrated || !modelLoaded) return;
@@ -423,7 +596,7 @@ export default function Live2DControls({
 
   const parseManualMotionFiles = useCallback(() => {
     if (!manualMotionFiles.trim()) {
-      updateDebugInfo('请输入动作文件名');
+      void autoParseModelFiles(selectedModel);
       return;
     }
     const modelDir = parseModelDir(selectedModel);
@@ -434,11 +607,11 @@ export default function Live2DControls({
     const files = parseManualFiles(manualMotionFiles, '.motion3.json', `${modelDir}/motions`);
     setAvailableMotionFiles(files);
     updateDebugInfo(`手动添加了 ${files.length} 个动作文件`);
-  }, [manualMotionFiles, selectedModel, updateDebugInfo]);
+  }, [autoParseModelFiles, manualMotionFiles, selectedModel, updateDebugInfo]);
 
   const parseManualExpressionFiles = useCallback(() => {
     if (!manualExpressionFiles.trim()) {
-      updateDebugInfo('请输入表情文件名');
+      void autoParseModelFiles(selectedModel);
       return;
     }
     const modelDir = parseModelDir(selectedModel);
@@ -453,7 +626,7 @@ export default function Live2DControls({
     );
     setAvailableExpressionFiles(files);
     updateDebugInfo(`手动添加了 ${files.length} 个表情文件`);
-  }, [manualExpressionFiles, selectedModel, updateDebugInfo]);
+  }, [autoParseModelFiles, manualExpressionFiles, selectedModel, updateDebugInfo]);
 
   const addNewMotion = useCallback(() => {
     const trimmed = newMotionName.trim();
@@ -782,10 +955,12 @@ export default function Live2DControls({
     (modelPath) => {
       setSelectedModel(modelPath);
       onModelChange?.(modelPath);
+      setManualMotionFiles('');
+      setManualExpressionFiles('');
       updateDebugInfo(`切换模型: ${modelPath}`);
-      clearModelFileAssociations();
+      void autoParseModelFiles(modelPath);
     },
-    [clearModelFileAssociations, onModelChange, updateDebugInfo],
+    [autoParseModelFiles, onModelChange, updateDebugInfo],
   );
 
   const toggleAutoEyeBlink = useCallback(
@@ -1432,6 +1607,7 @@ export default function Live2DControls({
           modelLoaded={modelLoaded}
           motions={motions}
           availableMotionFiles={availableMotionFiles}
+          isParsingModelFiles={isParsingModelFiles}
           manualMotionFiles={manualMotionFiles}
           onManualMotionFilesChange={setManualMotionFiles}
           onParseManualMotionFiles={parseManualMotionFiles}
@@ -1450,6 +1626,7 @@ export default function Live2DControls({
           modelLoaded={modelLoaded}
           expressions={expressions}
           availableExpressionFiles={availableExpressionFiles}
+          isParsingModelFiles={isParsingModelFiles}
           manualExpressionFiles={manualExpressionFiles}
           onManualExpressionFilesChange={setManualExpressionFiles}
           onParseManualExpressionFiles={parseManualExpressionFiles}

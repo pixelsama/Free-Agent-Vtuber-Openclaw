@@ -18,6 +18,7 @@ export default function MotionPanel({
   modelLoaded,
   motions,
   availableMotionFiles,
+  isParsingModelFiles,
   manualMotionFiles,
   onManualMotionFilesChange,
   onParseManualMotionFiles,
@@ -43,17 +44,17 @@ export default function MotionPanel({
       <AccordionDetails>
         <Stack spacing={2}>
           <TextField
-            label="手动输入动作文件名"
+            label="手动输入动作文件名（可选）"
             value={manualMotionFiles}
             onChange={(event) => onManualMotionFilesChange(event.target.value)}
             multiline
             minRows={3}
-            placeholder={'每行一个文件名，例如:\nidle_01\ntap_body_01'}
+            placeholder={'留空可自动解析 model3.json；或每行一个文件名，例如:\nidle_01\ntap_body_01'}
             size="small"
             fullWidth
           />
-          <Button variant="outlined" onClick={onParseManualMotionFiles}>
-            解析文件名
+          <Button variant="outlined" onClick={onParseManualMotionFiles} disabled={isParsingModelFiles}>
+            {isParsingModelFiles ? '解析中...' : '自动解析（model3.json）/手动解析'}
           </Button>
 
           {availableMotionFiles.length > 0 && (
