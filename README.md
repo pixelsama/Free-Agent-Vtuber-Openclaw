@@ -6,7 +6,7 @@
 - 本地适配层：Electron Main（Node）
 - 上游 AI：OpenClaw `/v1/chat/completions`
 
-当前默认链路已不再依赖 Python gateway。
+当前默认链路为 Electron + OpenClaw，无 Python 后端服务依赖。
 
 ## 快速开始（桌面开发）
 
@@ -51,7 +51,7 @@ npm run test:frontend
 
 - `desktop/electron/`：Electron 主进程、preload、IPC、OpenClaw 适配
 - `front_end/`：React UI
-- `services/`：历史 Python 服务代码（不再是桌面主链路依赖）
+- `docs/`：设计与规划文档（历史文档已归档）
 
 ## 关键特性
 

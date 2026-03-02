@@ -1,40 +1,47 @@
 # Repository Guidelines
 
 ## Project Structure & Modules
-- `services/` — Python microservices: `dialog-engine/`, `gateway-python/`, `input-handler-python/`, `memory-python/`, `long-term-memory-python/`, `output-handler-python/`, `async-workers/` (each has its own `main.py`, `Dockerfile`, and often `tests/`).
-- `front_end/` — Vue 3 + Vite UI (`src/`, `package.json`).
-- `docs/` — architecture and plans.  `utils/` — shared helpers.  `.env.example` — config template.
+- `desktop/electron/` — Electron main/preload, IPC handlers, OpenClaw stream adapter.
+- `front_end/` — React + Vite renderer (`src/`, `tests/`, `package.json`).
+- `docs/` — current plans and architecture notes (historical docs are in `docs/archive/`).
+- Root `package.json` — desktop scripts and packaging (`electron-builder`).
 
 ## Build, Test, and Run
-- Docker (full stack): `docker compose up -d`
-  - Dev hot-reload: `docker compose -f docker-compose.dev.yml up`
-- Gateway (Docker): exposed on `:8000`. Redis on `:6379`, Postgres on `:5432`.
-- Frontend: `cd front_end && npm install && npm run dev` (build: `npm run build`).
-- Python dev tools: `pip install -r requirements-dev.txt`
-- Tests (per service): `cd services/<service> && pytest -q`
+- Install deps:
+  - Root: `npm install`
+  - Frontend: `cd front_end && npm install`
+- Desktop dev:
+  - `npm run desktop:dev`
+- Build desktop package:
+  - `npm run desktop:build`
+- Tests:
+  - Desktop main-process tests: `npm run test:desktop`
+  - Frontend tests: `npm run test:frontend`
+  - Frontend lint: `cd front_end && npm run lint`
 
 ## Coding Style & Naming
-- Python: 4-space indent, type hints where practical.
-  - Format: `black . && isort .`
-  - Lint: `flake8 .`
-  - Types: `mypy .` (service-local where applicable)
-  - Tests named `test_*.py` under `tests/unit` and `tests/integration`.
-- Frontend: Vue 3 + Vite; prefer `<script setup>` and PascalCase components (e.g., `Live2DViewer.vue`). Keep module/class/file names descriptive.
+- JavaScript/React: prefer clear module boundaries and descriptive names.
+- Keep security-sensitive logic in Electron main process, not renderer.
+- Keep preload API minimal and explicit.
 
 ## Testing Guidelines
-- Framework: `pytest`, `pytest-asyncio` for async, `pytest-mock` for fakes.
-- Place fast unit tests under `tests/unit/`; cross-service or networked flows under `tests/integration/`.
-- Keep tests hermetic; mock external APIs (e.g., OpenAI) and Redis where possible.
+- Frameworks:
+  - Desktop: Node built-in `node:test`
+  - Frontend: `vitest`
+- Focus regression tests on:
+  - IPC stream event mapping (`text-delta/done/error`)
+  - stream abort behavior
+  - settings persistence and token handling
+  - SSE parsing robustness
 
 ## Commit & PR Guidelines
-- Commits follow conventional style observed in history: `feat:`, `fix:`, `test:`, `chore:` (e.g., `test: add memory service tests`).
-- PRs must include:
-  - Clear description and rationale; link related issues.
-  - Impact notes (services touched, API changes, env vars).
-  - Tests for new behavior; screenshots for UI changes (`front_end/`).
+- Conventional commit style: `feat:`, `fix:`, `test:`, `chore:`.
+- PR should include:
+  - Scope and rationale
+  - User-visible behavior changes
+  - Tests run and results
 
 ## Security & Config
-- Copy `.env.example` to `.env`; never commit secrets. Set `OPENAI_API_KEY`, Postgres, and Redis envs as needed.
-- Prefer `docker-compose.dev.yml` for local dev; volumes persist temp and data directories.
-- Validate inputs on service boundaries; avoid logging sensitive content.
-
+- OpenClaw token should be managed in Electron main process and stored via system keychain when available.
+- Do not expose token to renderer over preload APIs.
+- Keep `contextIsolation: true` and `sandbox: true` for BrowserWindow.

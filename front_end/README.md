@@ -2,7 +2,7 @@
 
 本前端默认运行在 Electron Renderer 中：
 - 流式聊天优先走 `window.desktop` IPC（主进程转 OpenClaw SSE）
-- 非 Electron 环境下会自动 fallback 到 Web `fetch('/chat/stream')`
+- 非 Electron 环境仅用于开发调试，不作为生产运行形态
 
 ## 本地开发
 
