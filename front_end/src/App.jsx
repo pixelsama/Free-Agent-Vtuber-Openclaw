@@ -418,18 +418,32 @@ export default function App() {
           </IconButton>
         )}
 
-        {desktopMode && (
+        {desktopMode && !isPetMode && (
           <IconButton
-            className={`mode-toggle ${isPetMode ? 'mode-toggle-pet' : ''}`}
+            className="mode-toggle"
             color="primary"
             onClick={() => {
-              void setDesktopWindowMode(isPetMode ? MODE_WINDOW : MODE_PET);
+              void setDesktopWindowMode(MODE_PET);
             }}
-            {...bindPetHover('mode-toggle')}
-            title={isPetMode ? '切换到主窗口模式' : '切换到桌宠模式'}
+            title="切换到桌宠模式"
           >
             <SwapHorizIcon />
           </IconButton>
+        )}
+
+        {desktopMode && isPetMode && (
+          <Box className="pet-mode-toggle-wrap" {...bindPetHover('pet-mode-toggle-wrap')}>
+            <IconButton
+              className="pet-mode-toggle"
+              color="primary"
+              onClick={() => {
+                void setDesktopWindowMode(MODE_WINDOW);
+              }}
+              title="切换到主窗口模式"
+            >
+              <SwapHorizIcon />
+            </IconButton>
+          </Box>
         )}
 
         <SubtitleBar text={subtitleText} />
