@@ -1,15 +1,10 @@
-# 前端本地开发（OpenClaw 文本版，React）
+# 前端说明（React + Electron Renderer）
 
-该副本前端当前是文本链路：
-- React 18 + MUI + Vite
-- 使用 `POST /chat/stream` 获取流式字幕
-- 语音入口已禁用（Phase 1 不接 TTS/ASR）
+本前端默认运行在 Electron Renderer 中：
+- 流式聊天优先走 `window.desktop` IPC（主进程转 OpenClaw SSE）
+- 非 Electron 环境下会自动 fallback 到 Web `fetch('/chat/stream')`
 
-## 环境要求
-- Node.js 18+
-- npm
-
-## 安装与启动
+## 本地开发
 
 ```bash
 cd front_end
@@ -19,24 +14,24 @@ npm run dev
 
 默认地址：`http://localhost:3000`
 
-## Live2D 模型放置目录（推荐）
+如需完整桌面联调，请在仓库根目录运行：
 
-请将模型资源放到：
+```bash
+npm run desktop:dev
+```
+
+## Live2D 模型放置目录（推荐）
 
 `front_end/public/live2d/models/<ModelName>/`
 
-并在前端使用路径：
+模型 JSON 路径示例：
 
 `/live2d/models/<ModelName>/<ModelName>.model3.json`
 
-这样在 `npm run dev` 与 `npm run build` 后的生产静态部署都能一致访问，避免 `src/` 路径在构建后失效。
-
-## 环境变量
+## 环境变量（仅 Web fallback）
 
 参考 `front_end/.env.example`：
-- `VITE_API_BASE_URL=http://127.0.0.1:8000`
-- `VITE_STREAM_PATH=chat/stream`
+- `VITE_API_BASE_URL`
+- `VITE_STREAM_PATH`
 
-## 联调要求
-
-先启动网关（`docker compose up gateway` 或单独运行 `services/gateway-python/main.py`），并确保网关可访问到用户部署的 OpenClaw。
+在 Electron 模式下，OpenClaw 配置来自应用设置页，不依赖上述变量。

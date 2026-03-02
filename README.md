@@ -1,46 +1,51 @@
-# Free-Agent-Vtuber OpenClaw Fork（Phase 1 文本版）
+# Free-Agent-Vtuber OpenClaw Desktop（Electron）
 
-这是基于 `Free-Agent-Vtuber` 的实验副本，目标是：
-- 删除原有 `dialog-engine` 主链路
-- 用 OpenClaw 作为文本 AI 引擎
-- 前端保留现有字幕流协议（`text-delta` / `done`）
+本仓库当前主目标是桌面端：
+- 前端：React 18 + Vite
+- 桌面壳：Electron
+- 本地适配层：Electron Main（Node）
+- 上游 AI：OpenClaw `/v1/chat/completions`
 
-## 本副本改动重点
-- 已移除：`services/dialog-engine`
-- 已改造：`services/gateway-python/main.py`
-  - `/chat/stream` -> OpenClaw `/v1/chat/completions`
-  - OpenAI SSE -> 前端事件映射
-- 已下线：`/chat/audio/stream`（返回 `410`）
-- 已调整：`docker-compose*.yml` 为最小 OpenClaw 测试编排
-- 已禁用：前端麦克风入口（仅文本测试）
-- 前端已迁移：React 18 + MUI（不再依赖 Vue/Vuetify）
+当前默认链路已不再依赖 Python gateway。
 
-## 快速开始
+## 快速开始（桌面开发）
 
-1. 准备 OpenClaw（由用户自行部署）
-- 启用 `/v1/chat/completions`
-- 准备 Bearer Token
-
-2. 启动本项目网关
+1. 安装依赖
 
 ```bash
-cp .env.example .env
-docker compose up --build gateway
-```
-
-3. 启动前端
-
-```bash
-cd front_end
 npm install
-npm run dev
+cd front_end && npm install && cd ..
 ```
 
-4. 在前端发送文本，观察字幕流是否返回。
+2. 启动 Electron + 前端开发服务器
 
-## 关键环境变量
-- `OPENCLAW_BASE_URL`
-- `OPENCLAW_TOKEN`
-- `OPENCLAW_AGENT_ID`
+```bash
+npm run desktop:dev
+```
 
-详见根目录 `.env.example`。
+3. 在应用内打开“设置”面板，填写：
+- `OpenClaw Base URL`
+- `OpenClaw Token`
+- `OpenClaw Agent ID`
+
+4. 点击“连接测试”成功后即可发送文本消息。
+
+## 打包发布
+
+```bash
+npm run desktop:build
+```
+
+默认会先构建前端，再用 `electron-builder` 生成安装包（Win/macOS/Linux）。
+
+## 目录说明
+
+- `desktop/electron/`：Electron 主进程、preload、IPC、OpenClaw 适配
+- `front_end/`：React UI
+- `services/`：历史 Python 服务代码（不再是桌面主链路依赖）
+
+## 关键特性
+
+- Renderer 通过 IPC 请求流式聊天，不直接持有 OpenClaw token
+- 主进程把 OpenClaw SSE 映射为 `text-delta / done / error`
+- 支持 `chat:stream:abort` 中断流式请求

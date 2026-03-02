@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
+import { desktopBridge } from '../services/desktopBridge.js';
 
 const deltaHandlers = new Set();
 const doneHandlers = new Set();
 const errorHandlers = new Set();
 const statusHandlers = new Set();
+
+const desktopPendingMap = new Map();
+let desktopEventCleanup = null;
+let activeDesktopStreamId = null;
 
 let isStreamingState = false;
 let abortController = null;
@@ -104,23 +109,133 @@ const processSseEvent = (eventType, data, emitDone) => {
   }
 };
 
-const startStreaming = async (sessionId, content, extras = {}) => {
-  if (!content) {
+const ensureDesktopEventListener = () => {
+  if (!desktopBridge.isDesktop() || desktopEventCleanup) {
     return;
   }
 
+  desktopEventCleanup = desktopBridge.chat.onEvent((event = {}) => {
+    const { streamId, type, payload } = event;
+    if (!streamId || !type) {
+      return;
+    }
+
+    const pending = desktopPendingMap.get(streamId);
+    if (!pending) {
+      return;
+    }
+
+    if (type === 'text-delta') {
+      if (payload?.content) {
+        notifyHandlers(deltaHandlers, payload.content);
+      }
+      return;
+    }
+
+    if (type === 'error') {
+      notifyHandlers(errorHandlers, payload);
+      pending.resolve({ endedBy: 'error' });
+      desktopPendingMap.delete(streamId);
+      if (activeDesktopStreamId === streamId) {
+        activeDesktopStreamId = null;
+      }
+      return;
+    }
+
+    if (type === 'done') {
+      pending.emitDone(payload || null);
+      pending.resolve({ endedBy: 'done' });
+      desktopPendingMap.delete(streamId);
+      if (activeDesktopStreamId === streamId) {
+        activeDesktopStreamId = null;
+      }
+    }
+  });
+};
+
+const startDesktopStreaming = async (sessionId, content, extras, emitDone) => {
+  ensureDesktopEventListener();
+
+  if (activeDesktopStreamId) {
+    try {
+      await desktopBridge.chat.abort({ streamId: activeDesktopStreamId });
+    } catch (error) {
+      console.warn('Abort previous desktop stream failed:', error);
+    }
+  }
+
+  const startResult = await desktopBridge.chat.start({
+    sessionId,
+    content,
+    options: extras?.options || {},
+  });
+
+  const streamId = startResult?.streamId;
+  if (!streamId) {
+    throw new Error('desktop_stream_start_failed');
+  }
+
+  activeDesktopStreamId = streamId;
+
+  await new Promise((resolve) => {
+    desktopPendingMap.set(streamId, {
+      emitDone,
+      resolve,
+    });
+  });
+};
+
+const startWebStreaming = async (sessionId, content, extras, emitDone) => {
   if (abortController) {
     abortController.abort();
   }
 
   abortController = new AbortController();
-  setStreamingState(true);
 
   const payload = {
     session_id: sessionId,
     content,
     ...extras,
   };
+
+  const response = await fetch(buildStreamUrl(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    signal: abortController.signal,
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(`流式接口请求失败: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const textDecoder = new TextDecoder('utf-8');
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += textDecoder.decode(value, { stream: true });
+    buffer = parseSseChunk(buffer, (eventType, data) => {
+      processSseEvent(eventType, data, emitDone);
+    });
+  }
+
+  const remaining = textDecoder.decode();
+  if (remaining) {
+    parseSseChunk(buffer + remaining, (eventType, data) => {
+      processSseEvent(eventType, data, emitDone);
+    });
+  }
+};
+
+const startStreaming = async (sessionId, content, extras = {}) => {
+  if (!content) {
+    return;
+  }
 
   let doneEmitted = false;
 
@@ -129,58 +244,49 @@ const startStreaming = async (sessionId, content, extras = {}) => {
     notifyHandlers(doneHandlers, payloadData);
   };
 
+  setStreamingState(true);
+
   try {
-    const response = await fetch(buildStreamUrl(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: abortController.signal,
-    });
-
-    if (!response.ok || !response.body) {
-      throw new Error(`流式接口请求失败: ${response.status}`);
-    }
-
-    const reader = response.body.getReader();
-    const textDecoder = new TextDecoder('utf-8');
-    let buffer = '';
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += textDecoder.decode(value, { stream: true });
-      buffer = parseSseChunk(buffer, (eventType, data) => {
-        processSseEvent(eventType, data, emitDone);
-      });
-    }
-
-    const remaining = textDecoder.decode();
-    if (remaining) {
-      parseSseChunk(buffer + remaining, (eventType, data) => {
-        processSseEvent(eventType, data, emitDone);
-      });
-    }
-
-    if (!doneEmitted) {
-      emitDone(null);
+    if (desktopBridge.isDesktop()) {
+      await startDesktopStreaming(sessionId, content, extras, emitDone);
+    } else {
+      await startWebStreaming(sessionId, content, extras, emitDone);
+      if (!doneEmitted) {
+        emitDone(null);
+      }
     }
   } catch (error) {
-    if (error.name !== 'AbortError') {
+    if (error?.name !== 'AbortError') {
       console.error('Streaming request failed:', error);
       notifyHandlers(errorHandlers, error);
     }
   } finally {
-    if (abortController?.signal.aborted && !doneEmitted) {
+    if (abortController?.signal?.aborted && !doneEmitted) {
       emitDone({ aborted: true });
     }
-    abortController = null;
+
+    if (!desktopBridge.isDesktop()) {
+      abortController = null;
+    }
+
     setStreamingState(false);
   }
 };
 
-const cancelStreaming = () => {
+const cancelStreaming = async () => {
+  if (desktopBridge.isDesktop()) {
+    if (activeDesktopStreamId) {
+      const streamId = activeDesktopStreamId;
+      activeDesktopStreamId = null;
+      try {
+        await desktopBridge.chat.abort({ streamId });
+      } catch (error) {
+        console.error('Abort desktop stream failed:', error);
+      }
+    }
+    return;
+  }
+
   if (abortController) {
     abortController.abort();
   }

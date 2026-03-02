@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -7,9 +8,11 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   IconButton,
   Stack,
   TextField,
+  Typography,
 } from '@mui/material';
 import TuneIcon from '@mui/icons-material/Tune';
 import EditIcon from '@mui/icons-material/Edit';
@@ -19,8 +22,35 @@ import Live2DControls from './components/controls/Live2DControls.jsx';
 import SubtitleBar from './components/subtitle/SubtitleBar.jsx';
 import { useStreamingChat } from './hooks/useStreamingChat.js';
 import { useSubtitleFeed } from './hooks/useSubtitleFeed.js';
+import { desktopBridge } from './services/desktopBridge.js';
 
 const DEFAULT_MODEL = '/live2d/models/Haru/Haru.model3.json';
+
+const defaultOpenClawSettings = {
+  baseUrl: '',
+  token: '',
+  agentId: 'main',
+};
+
+function normalizeErrorMessage(error) {
+  if (!error) {
+    return '请求失败，请稍后重试。';
+  }
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  if (typeof error?.message === 'string' && error.message) {
+    return error.message;
+  }
+
+  if (typeof error?.payload?.message === 'string' && error.payload.message) {
+    return error.payload.message;
+  }
+
+  return '请求失败，请稍后重试。';
+}
 
 export default function App() {
   const live2dViewerRef = useRef(null);
@@ -36,6 +66,12 @@ export default function App() {
   const [textInputContent, setTextInputContent] = useState('');
   const [textInputError, setTextInputError] = useState('');
 
+  const [openClawSettings, setOpenClawSettings] = useState(defaultOpenClawSettings);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsTesting, setSettingsTesting] = useState(false);
+  const [settingsFeedback, setSettingsFeedback] = useState('');
+  const [settingsError, setSettingsError] = useState('');
+
   const { subtitleText, appendDelta, replaceText, clearSubtitle, beginStream } = useSubtitleFeed();
   const { startStreaming, cancelStreaming, onDelta, onDone, onError, isStreaming } = useStreamingChat();
 
@@ -50,6 +86,32 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
+    const loadSettings = async () => {
+      try {
+        const settings = await desktopBridge.settings.get();
+        if (!mounted) {
+          return;
+        }
+
+        setOpenClawSettings({
+          ...defaultOpenClawSettings,
+          ...settings,
+        });
+      } catch (error) {
+        console.error('Failed to load OpenClaw settings:', error);
+      }
+    };
+
+    void loadSettings();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     subtitleTextRef.current = subtitleText;
   }, [subtitleText]);
 
@@ -59,6 +121,7 @@ export default function App() {
     const detachError = onError((error) => {
       console.error('字幕流式输出发生错误:', error);
       clearSubtitle();
+      setTextInputError(normalizeErrorMessage(error));
     });
 
     return () => {
@@ -70,7 +133,7 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      cancelStreaming();
+      void cancelStreaming();
     };
   }, [cancelStreaming]);
 
@@ -84,7 +147,7 @@ export default function App() {
   );
 
   const stopStreaming = useCallback(() => {
-    cancelStreaming();
+    void cancelStreaming();
   }, [cancelStreaming]);
 
   const openTextInputDialog = useCallback(() => {
@@ -115,7 +178,7 @@ export default function App() {
       setTextInputContent('');
     } catch (error) {
       console.error('发送文字消息失败:', error);
-      setTextInputError('发送失败，请稍后重试。');
+      setTextInputError(normalizeErrorMessage(error));
     }
   }, [sendUserText, textInputContent]);
 
@@ -133,6 +196,58 @@ export default function App() {
     setCurrentModelPath(modelPath);
     setModelLoaded(false);
   }, []);
+
+  const handleOpenClawSettingChange = useCallback((field, value) => {
+    setOpenClawSettings((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+    setSettingsFeedback('');
+    setSettingsError('');
+  }, []);
+
+  const saveOpenClawSettings = useCallback(async () => {
+    setSettingsSaving(true);
+    setSettingsError('');
+    setSettingsFeedback('');
+
+    try {
+      const saved = await desktopBridge.settings.save(openClawSettings);
+      setOpenClawSettings({
+        ...defaultOpenClawSettings,
+        ...saved,
+      });
+      setSettingsFeedback('OpenClaw 配置已保存。');
+    } catch (error) {
+      console.error('Save OpenClaw settings failed:', error);
+      setSettingsError(normalizeErrorMessage(error));
+    } finally {
+      setSettingsSaving(false);
+    }
+  }, [openClawSettings]);
+
+  const testOpenClawSettings = useCallback(async () => {
+    setSettingsTesting(true);
+    setSettingsError('');
+    setSettingsFeedback('');
+
+    try {
+      const result = await desktopBridge.settings.testConnection(openClawSettings);
+      if (!result?.ok) {
+        setSettingsError(normalizeErrorMessage(result?.error));
+      } else {
+        const latency = typeof result.latencyMs === 'number' ? `（${result.latencyMs}ms）` : '';
+        setSettingsFeedback(`OpenClaw 连接成功${latency}`);
+      }
+    } catch (error) {
+      console.error('Test OpenClaw settings failed:', error);
+      setSettingsError(normalizeErrorMessage(error));
+    } finally {
+      setSettingsTesting(false);
+    }
+  }, [openClawSettings]);
+
+  const desktopMode = desktopBridge.isDesktop();
 
   return (
     <Box sx={stageStyle}>
@@ -177,34 +292,83 @@ export default function App() {
           </Stack>
         </DialogTitle>
         <DialogContent dividers>
-          <Live2DControls
-            live2dViewerRef={live2dViewerRef}
-            modelLoaded={modelLoaded}
-            onModelChange={handleControlModelChange}
-            onMotionsUpdate={setMotions}
-            onExpressionsUpdate={setExpressions}
-            onAutoEyeBlinkChange={(enabled) => {
-              live2dViewerRef.current?.getManager?.()?.setAutoEyeBlinkEnable(enabled);
-            }}
-            onAutoBreathChange={(enabled) => {
-              live2dViewerRef.current?.getManager?.()?.setAutoBreathEnable(enabled);
-            }}
-            onEyeTrackingChange={(enabled) => {
-              live2dViewerRef.current?.getManager?.()?.setEyeTracking(enabled);
-            }}
-            onModelScaleChange={(scale) => {
-              live2dViewerRef.current?.getManager?.()?.setModelScale(scale);
-            }}
-            onBackgroundChange={(backgroundConfig) => {
-              const manager = live2dViewerRef.current?.getManager?.();
-              if (!manager) return;
-              if (!backgroundConfig.hasBackground) {
-                manager.clearBackground();
-                return;
-              }
-              manager.setBackgroundOpacity(backgroundConfig.opacity ?? 1);
-            }}
-          />
+          <Stack spacing={3}>
+            <Live2DControls
+              live2dViewerRef={live2dViewerRef}
+              modelLoaded={modelLoaded}
+              onModelChange={handleControlModelChange}
+              onMotionsUpdate={setMotions}
+              onExpressionsUpdate={setExpressions}
+              onAutoEyeBlinkChange={(enabled) => {
+                live2dViewerRef.current?.getManager?.()?.setAutoEyeBlinkEnable(enabled);
+              }}
+              onAutoBreathChange={(enabled) => {
+                live2dViewerRef.current?.getManager?.()?.setAutoBreathEnable(enabled);
+              }}
+              onEyeTrackingChange={(enabled) => {
+                live2dViewerRef.current?.getManager?.()?.setEyeTracking(enabled);
+              }}
+              onModelScaleChange={(scale) => {
+                live2dViewerRef.current?.getManager?.()?.setModelScale(scale);
+              }}
+              onBackgroundChange={(backgroundConfig) => {
+                const manager = live2dViewerRef.current?.getManager?.();
+                if (!manager) return;
+                if (!backgroundConfig.hasBackground) {
+                  manager.clearBackground();
+                  return;
+                }
+                manager.setBackgroundOpacity(backgroundConfig.opacity ?? 1);
+              }}
+            />
+
+            <Divider />
+
+            <Stack spacing={2}>
+              <Typography variant="h6">OpenClaw 设置</Typography>
+
+              {!desktopMode && (
+                <Alert severity="info">当前为 Web 模式，配置会保存在浏览器本地存储。</Alert>
+              )}
+
+              <TextField
+                label="OpenClaw Base URL"
+                value={openClawSettings.baseUrl}
+                onChange={(event) => handleOpenClawSettingChange('baseUrl', event.target.value)}
+                placeholder="http://127.0.0.1:18789"
+                fullWidth
+              />
+
+              <TextField
+                label="OpenClaw Token"
+                value={openClawSettings.token}
+                onChange={(event) => handleOpenClawSettingChange('token', event.target.value)}
+                type="password"
+                autoComplete="off"
+                fullWidth
+              />
+
+              <TextField
+                label="OpenClaw Agent ID"
+                value={openClawSettings.agentId}
+                onChange={(event) => handleOpenClawSettingChange('agentId', event.target.value)}
+                placeholder="main"
+                fullWidth
+              />
+
+              <Stack direction="row" spacing={1}>
+                <Button variant="contained" onClick={saveOpenClawSettings} disabled={settingsSaving || settingsTesting}>
+                  {settingsSaving ? '保存中...' : '保存设置'}
+                </Button>
+                <Button variant="outlined" onClick={testOpenClawSettings} disabled={settingsSaving || settingsTesting}>
+                  {settingsTesting ? '测试中...' : '连接测试'}
+                </Button>
+              </Stack>
+
+              {settingsError && <Alert severity="error">{settingsError}</Alert>}
+              {settingsFeedback && <Alert severity="success">{settingsFeedback}</Alert>}
+            </Stack>
+          </Stack>
         </DialogContent>
       </Dialog>
 
@@ -224,7 +388,7 @@ export default function App() {
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
-                  submitTextInput();
+                  void submitTextInput();
                 }
               }}
             />
@@ -237,7 +401,7 @@ export default function App() {
           <Button variant="text" onClick={closeTextInputDialog} disabled={isStreaming}>
             取消
           </Button>
-          <Button variant="contained" onClick={submitTextInput} disabled={isStreaming}>
+          <Button variant="contained" onClick={() => void submitTextInput()} disabled={isStreaming}>
             {isStreaming ? '发送中' : '发送'}
           </Button>
           <Button variant="text" color="warning" onClick={stopStreaming} disabled={!isStreaming}>

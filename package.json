@@ -1,0 +1,49 @@
+{
+  "name": "free-agent-vtuber-openclaw-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "main": "desktop/electron/main.js",
+  "scripts": {
+    "frontend:dev": "npm --prefix front_end run dev",
+    "frontend:build": "npm --prefix front_end run build",
+    "desktop:dev:renderer": "npm run frontend:dev",
+    "desktop:dev:electron": "cross-env ELECTRON_DEV_SERVER_URL=http://127.0.0.1:3000 electron .",
+    "desktop:dev": "concurrently -k \"npm:desktop:dev:renderer\" \"npm:desktop:dev:electron\"",
+    "desktop:build": "npm run frontend:build && electron-builder",
+    "test:frontend": "npm --prefix front_end run test -- --run"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "electron": "^36.2.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.freeagent.vtuber.openclaw",
+    "productName": "Free Agent VTuber OpenClaw",
+    "directories": {
+      "output": "release"
+    },
+    "asar": true,
+    "files": [
+      "desktop/electron/**/*",
+      "front_end/dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
+  }
+}

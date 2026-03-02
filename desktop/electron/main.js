@@ -1,0 +1,112 @@
+const path = require('node:path');
+const { app, BrowserWindow, shell, ipcMain } = require('electron');
+
+const { registerChatStreamIpc } = require('./ipc/chatStream');
+const { registerSettingsIpc } = require('./ipc/settings');
+const { SettingsStore } = require('./services/settingsStore');
+
+let mainWindow = null;
+let disposeChatStreamHandlers = null;
+let settingsStore = null;
+
+function getRendererDevUrl() {
+  return process.env.ELECTRON_DEV_SERVER_URL || 'http://127.0.0.1:3000';
+}
+
+function isAllowedExternalUrl(targetUrl) {
+  try {
+    const parsedTarget = new URL(targetUrl);
+    const parsedBase = new URL(settingsStore.get().baseUrl);
+    return parsedTarget.origin === parsedBase.origin;
+  } catch {
+    return false;
+  }
+}
+
+async function createMainWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 960,
+    minHeight: 680,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webSecurity: true,
+    },
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) {
+      shell.openExternal(url);
+    }
+
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = mainWindow?.webContents.getURL() || '';
+    if (url !== currentUrl) {
+      event.preventDefault();
+    }
+  });
+
+  if (app.isPackaged) {
+    const indexFile = path.join(app.getAppPath(), 'front_end', 'dist', 'index.html');
+    await mainWindow.loadFile(indexFile);
+  } else {
+    await mainWindow.loadURL(getRendererDevUrl());
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+async function bootstrap() {
+  settingsStore = new SettingsStore(app);
+  await settingsStore.init();
+
+  registerSettingsIpc({ ipcMain, settingsStore });
+
+  disposeChatStreamHandlers = registerChatStreamIpc({
+    ipcMain,
+    getSettings: () => settingsStore.get(),
+    emitEvent: (payload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+
+      mainWindow.webContents.send('chat:stream:event', payload);
+    },
+  });
+
+  await createMainWindow();
+
+  app.on('activate', async () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      await createMainWindow();
+    }
+  });
+}
+
+app.whenReady().then(bootstrap).catch((error) => {
+  console.error('Electron bootstrap failed:', error);
+  app.quit();
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('before-quit', () => {
+  if (disposeChatStreamHandlers) {
+    disposeChatStreamHandlers();
+  }
+});
