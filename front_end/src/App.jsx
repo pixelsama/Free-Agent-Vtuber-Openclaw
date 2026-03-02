@@ -68,7 +68,9 @@ export default function App() {
   const [motions, setMotions] = useState([]);
   const [expressions, setExpressions] = useState([]);
   const [windowMode, setWindowMode] = useState(MODE_WINDOW);
-  const [platform, setPlatform] = useState('unknown');
+  const [platform, setPlatform] = useState(() =>
+    desktopMode ? desktopBridge.window.getPlatformSync() : 'unknown',
+  );
 
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [showTextInputDialog, setShowTextInputDialog] = useState(false);

@@ -96,6 +96,7 @@ const windowControls = {
 
 contextBridge.exposeInMainWorld('desktop', {
   isElectron: true,
+  platform: process.platform,
   chatStream,
   settings,
   windowMode,

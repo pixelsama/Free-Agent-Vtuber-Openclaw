@@ -13,6 +13,33 @@ function getDesktopApi() {
   return api;
 }
 
+function detectPlatformFallback() {
+  if (typeof navigator === 'undefined') {
+    return 'unknown';
+  }
+
+  const source = `${navigator.userAgent || ''} ${navigator.platform || ''}`.toLowerCase();
+  if (source.includes('mac')) {
+    return 'darwin';
+  }
+  if (source.includes('win')) {
+    return 'win32';
+  }
+  if (source.includes('linux')) {
+    return 'linux';
+  }
+
+  return 'unknown';
+}
+
+function resolvePlatformSyncFromApi(api) {
+  if (typeof api?.platform === 'string' && api.platform) {
+    return api.platform;
+  }
+
+  return detectPlatformFallback();
+}
+
 function normalizeSettingsResponse(settings = {}) {
   return {
     baseUrl: typeof settings.baseUrl === 'string' ? settings.baseUrl.trim() : '',
@@ -285,16 +312,25 @@ export const desktopBridge = {
     },
   },
   window: {
+    getPlatformSync() {
+      const api = getDesktopApi();
+      return resolvePlatformSyncFromApi(api);
+    },
     async getPlatform() {
       const api = getDesktopApi();
+      const fallbackPlatform = resolvePlatformSyncFromApi(api);
       if (!api?.windowControls?.getPlatform) {
-        return { platform: 'unknown' };
+        return { platform: fallbackPlatform };
       }
 
-      const result = await api.windowControls.getPlatform();
-      return {
-        platform: result?.platform || 'unknown',
-      };
+      try {
+        const result = await api.windowControls.getPlatform();
+        return {
+          platform: result?.platform || fallbackPlatform,
+        };
+      } catch {
+        return { platform: fallbackPlatform };
+      }
     },
     async control(action) {
       const api = getDesktopApi();

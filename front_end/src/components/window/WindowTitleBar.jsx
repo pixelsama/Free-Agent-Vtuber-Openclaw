@@ -11,7 +11,7 @@ export default function WindowTitleBar({
   onToggleMaximize,
   onClose,
 }) {
-  const isMac = platform === 'darwin';
+  const isMac = platform === 'darwin' || platform === 'mac';
 
   return (
     <div className={`window-titlebar ${isMac ? 'window-titlebar-mac' : 'window-titlebar-win'}`}>
