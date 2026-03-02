@@ -21,6 +21,7 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import Live2DViewer from './components/live2d/Live2DViewer.jsx';
 import Live2DControls from './components/controls/Live2DControls.jsx';
 import SubtitleBar from './components/subtitle/SubtitleBar.jsx';
+import WindowTitleBar from './components/window/WindowTitleBar.jsx';
 import { useStreamingChat } from './hooks/useStreamingChat.js';
 import { useSubtitleFeed } from './hooks/useSubtitleFeed.js';
 import { desktopBridge } from './services/desktopBridge.js';
@@ -67,6 +68,7 @@ export default function App() {
   const [motions, setMotions] = useState([]);
   const [expressions, setExpressions] = useState([]);
   const [windowMode, setWindowMode] = useState(MODE_WINDOW);
+  const [platform, setPlatform] = useState('unknown');
 
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [showTextInputDialog, setShowTextInputDialog] = useState(false);
@@ -194,6 +196,32 @@ export default function App() {
     };
   }, [desktopMode]);
 
+  useEffect(() => {
+    if (!desktopMode) {
+      return;
+    }
+
+    let mounted = true;
+    const loadPlatform = async () => {
+      try {
+        const result = await desktopBridge.window.getPlatform();
+        if (!mounted) {
+          return;
+        }
+
+        setPlatform(result?.platform || 'unknown');
+      } catch (error) {
+        console.error('Failed to load platform info:', error);
+      }
+    };
+
+    void loadPlatform();
+
+    return () => {
+      mounted = false;
+    };
+  }, [desktopMode]);
+
   const sendUserText = useCallback(
     async (content, options = {}) => {
       if (!content) return;
@@ -238,6 +266,21 @@ export default function App() {
         onMouseEnter: () => desktopBridge.mode.updateHover(componentId, true),
         onMouseLeave: () => desktopBridge.mode.updateHover(componentId, false),
       };
+    },
+    [desktopMode, isPetMode],
+  );
+
+  const controlWindow = useCallback(
+    async (action) => {
+      if (!desktopMode || isPetMode) {
+        return;
+      }
+
+      try {
+        await desktopBridge.window.control(action);
+      } catch (error) {
+        console.error(`Window control failed: ${action}`, error);
+      }
     },
     [desktopMode, isPetMode],
   );
@@ -392,6 +435,21 @@ export default function App() {
   return (
     <Box sx={stageStyle}>
       <Box className={`live2d-stage ${isPetMode ? 'pet-mode' : 'window-mode'}`}>
+        {desktopMode && !isPetMode && (
+          <WindowTitleBar
+            platform={platform}
+            onMinimize={() => {
+              void controlWindow('minimize');
+            }}
+            onToggleMaximize={() => {
+              void controlWindow('toggle-maximize');
+            }}
+            onClose={() => {
+              void controlWindow('close');
+            }}
+          />
+        )}
+
         <Box className="live2d-hitbox" {...bindPetHover('live2d-hitbox')}>
           <Live2DViewer
             ref={live2dViewerRef}

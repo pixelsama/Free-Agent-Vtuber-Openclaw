@@ -52,6 +52,8 @@ body,
 }
 
 .live2d-stage.window-mode .live2d-hitbox {
+  top: 44px;
+  height: calc(100% - 44px);
   pointer-events: auto;
 }
 
@@ -62,7 +64,7 @@ body,
 
 .config-toggle {
   position: absolute !important;
-  top: 20px;
+  top: 60px;
   right: 20px;
   z-index: 5;
   background: rgba(255, 255, 255, 0.85) !important;
@@ -78,7 +80,7 @@ body,
 
 .mode-toggle {
   position: absolute !important;
-  top: 20px;
+  top: 60px;
   left: 20px;
   z-index: 6;
   background: rgba(255, 255, 255, 0.85) !important;

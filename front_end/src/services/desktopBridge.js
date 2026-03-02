@@ -284,4 +284,25 @@ export const desktopBridge = {
       });
     },
   },
+  window: {
+    async getPlatform() {
+      const api = getDesktopApi();
+      if (!api?.windowControls?.getPlatform) {
+        return { platform: 'unknown' };
+      }
+
+      const result = await api.windowControls.getPlatform();
+      return {
+        platform: result?.platform || 'unknown',
+      };
+    },
+    async control(action) {
+      const api = getDesktopApi();
+      if (!api?.windowControls?.control) {
+        return { ok: false, reason: 'desktop_window_control_unavailable' };
+      }
+
+      return api.windowControls.control(action);
+    },
+  },
 };

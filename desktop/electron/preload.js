@@ -85,9 +85,19 @@ const windowMode = {
   },
 };
 
+const windowControls = {
+  getPlatform() {
+    return ipcRenderer.invoke('window:get-platform');
+  },
+  control(action) {
+    return ipcRenderer.invoke('window:control', { action });
+  },
+};
+
 contextBridge.exposeInMainWorld('desktop', {
   isElectron: true,
   chatStream,
   settings,
   windowMode,
+  windowControls,
 });

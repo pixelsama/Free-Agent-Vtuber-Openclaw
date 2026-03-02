@@ -16,6 +16,45 @@ let windowModeManager = null;
 let trayManager = null;
 let isQuitting = false;
 
+function registerWindowControlIpc() {
+  ipcMain.handle('window:get-platform', () => ({
+    platform: process.platform,
+  }));
+
+  ipcMain.handle('window:control', (_event, payload = {}) => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) {
+      return { ok: false, reason: 'window_unavailable' };
+    }
+
+    const action = payload?.action;
+    if (action === 'minimize') {
+      window.minimize();
+      return { ok: true };
+    }
+
+    if (action === 'toggle-maximize') {
+      if (window.isMaximized()) {
+        window.unmaximize();
+      } else {
+        window.maximize();
+      }
+      return { ok: true, maximized: window.isMaximized() };
+    }
+
+    if (action === 'close') {
+      if (process.platform === 'darwin') {
+        window.hide();
+      } else {
+        window.close();
+      }
+      return { ok: true };
+    }
+
+    return { ok: false, reason: 'unsupported_action' };
+  });
+}
+
 function getRendererDevUrl() {
   return process.env.ELECTRON_DEV_SERVER_URL || 'http://127.0.0.1:3000';
 }
@@ -130,6 +169,8 @@ async function bootstrap() {
     },
   });
 
+  registerWindowControlIpc();
+
   disposeChatStreamHandlers = registerChatStreamIpc({
     ipcMain,
     getSettings: () => settingsStore.getForMain(),
@@ -178,6 +219,9 @@ app.on('before-quit', () => {
   if (disposeModeHandlers) {
     disposeModeHandlers();
   }
+
+  ipcMain.removeHandler('window:get-platform');
+  ipcMain.removeHandler('window:control');
 
   trayManager?.destroy();
 });
