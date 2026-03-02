@@ -11,12 +11,27 @@ const theme = createTheme({
       main: '#1976d2',
     },
     background: {
-      default: '#f0f4ff',
+      default: 'transparent',
       paper: '#ffffff',
     },
   },
   shape: {
     borderRadius: 12,
+  },
+  components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        html: {
+          backgroundColor: 'transparent',
+        },
+        body: {
+          backgroundColor: 'transparent',
+        },
+        '#root': {
+          backgroundColor: 'transparent',
+        },
+      },
+    },
   },
 });
 
