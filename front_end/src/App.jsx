@@ -10,8 +10,9 @@ import {
   Divider,
   IconButton,
   Stack,
+  Tab,
+  Tabs,
   TextField,
-  Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import Live2DControls from './components/controls/Live2DControls.jsx';
@@ -67,6 +68,7 @@ function AppContent({ desktopMode }) {
   );
 
   const [showConfigPanel, setShowConfigPanel] = useState(false);
+  const [activeConfigTab, setActiveConfigTab] = useState(0);
   const [composerExternalError, setComposerExternalError] = useState('');
 
   const [openClawSettings, setOpenClawSettings] = useState(defaultOpenClawSettings);
@@ -355,6 +357,12 @@ function AppContent({ desktopMode }) {
     setModelLoaded(false);
   }, [isPetMode]);
 
+  useEffect(() => {
+    if (!showConfigPanel) {
+      setActiveConfigTab(0);
+    }
+  }, [showConfigPanel]);
+
   const textComposerProps = useMemo(
     () => ({
       isStreaming,
@@ -420,103 +428,109 @@ function AppContent({ desktopMode }) {
             <IconButton onClick={() => setShowConfigPanel(false)}>
               <CloseIcon />
             </IconButton>
-            <span>Live2D 控制面板</span>
+            <span>设置面板</span>
             {modelLoaded && <Chip color="success" size="small" label="模型已加载" />}
           </Stack>
         </DialogTitle>
         <DialogContent dividers>
-          <Stack spacing={3}>
-            <Live2DControls
-              live2dViewerRef={live2dViewerRef}
-              modelLoaded={modelLoaded}
-              isPetMode={isPetMode}
-              onModelChange={handleControlModelChange}
-              onMotionsUpdate={setMotions}
-              onExpressionsUpdate={setExpressions}
-              onAutoEyeBlinkChange={(enabled) => {
-                live2dViewerRef.current?.getManager?.()?.setAutoEyeBlinkEnable(enabled);
-              }}
-              onAutoBreathChange={(enabled) => {
-                live2dViewerRef.current?.getManager?.()?.setAutoBreathEnable(enabled);
-              }}
-              onEyeTrackingChange={(enabled) => {
-                live2dViewerRef.current?.getManager?.()?.setEyeTracking(enabled);
-              }}
-              onModelScaleChange={(scale) => {
-                live2dViewerRef.current?.getManager?.()?.setModelScale(scale);
-              }}
-              onBackgroundChange={(backgroundConfig) => {
-                const manager = live2dViewerRef.current?.getManager?.();
-                if (!manager) return;
-                if (!backgroundConfig.hasBackground) {
-                  manager.clearBackground();
-                  return;
-                }
-                manager.setBackgroundOpacity(backgroundConfig.opacity ?? 1);
-              }}
-            />
-
+          <Stack spacing={2}>
+            <Tabs value={activeConfigTab} onChange={(_, tab) => setActiveConfigTab(tab)} variant="fullWidth">
+              <Tab label="Live2D 控制面板" />
+              <Tab label="OpenClaw 设置" />
+            </Tabs>
             <Divider />
 
-            <Stack spacing={2}>
-              <Typography variant="h6">OpenClaw 设置</Typography>
-
-              {!desktopMode && (
-                <Alert severity="warning">
-                  当前为 Web 模式，Token 会存入浏览器本地存储，仅建议用于开发测试。
-                </Alert>
-              )}
-
-              {desktopMode && !openClawSettings.hasSecureStorage && (
-                <Alert severity="warning">系统密钥链不可用，Token 将回退为本地明文存储。</Alert>
-              )}
-
-              <TextField
-                label="OpenClaw Base URL"
-                value={openClawSettings.baseUrl}
-                onChange={(event) => handleOpenClawSettingChange('baseUrl', event.target.value)}
-                placeholder="http://127.0.0.1:18789"
-                fullWidth
+            {activeConfigTab === 0 && (
+              <Live2DControls
+                live2dViewerRef={live2dViewerRef}
+                modelLoaded={modelLoaded}
+                isPetMode={isPetMode}
+                onModelChange={handleControlModelChange}
+                onMotionsUpdate={setMotions}
+                onExpressionsUpdate={setExpressions}
+                onAutoEyeBlinkChange={(enabled) => {
+                  live2dViewerRef.current?.getManager?.()?.setAutoEyeBlinkEnable(enabled);
+                }}
+                onAutoBreathChange={(enabled) => {
+                  live2dViewerRef.current?.getManager?.()?.setAutoBreathEnable(enabled);
+                }}
+                onEyeTrackingChange={(enabled) => {
+                  live2dViewerRef.current?.getManager?.()?.setEyeTracking(enabled);
+                }}
+                onModelScaleChange={(scale) => {
+                  live2dViewerRef.current?.getManager?.()?.setModelScale(scale);
+                }}
+                onBackgroundChange={(backgroundConfig) => {
+                  const manager = live2dViewerRef.current?.getManager?.();
+                  if (!manager) return;
+                  if (!backgroundConfig.hasBackground) {
+                    manager.clearBackground();
+                    return;
+                  }
+                  manager.setBackgroundOpacity(backgroundConfig.opacity ?? 1);
+                }}
               />
+            )}
 
-              <TextField
-                label="OpenClaw Token"
-                value={openClawSettings.token}
-                onChange={(event) => handleOpenClawSettingChange('token', event.target.value)}
-                type="password"
-                autoComplete="off"
-                placeholder={openClawSettings.hasToken ? '已保存（留空表示不修改）' : ''}
-                fullWidth
-              />
+            {activeConfigTab === 1 && (
+              <Stack spacing={2}>
+                {!desktopMode && (
+                  <Alert severity="warning">
+                    当前为 Web 模式，Token 会存入浏览器本地存储，仅建议用于开发测试。
+                  </Alert>
+                )}
 
-              <TextField
-                label="OpenClaw Agent ID"
-                value={openClawSettings.agentId}
-                onChange={(event) => handleOpenClawSettingChange('agentId', event.target.value)}
-                placeholder="main"
-                fullWidth
-              />
+                {desktopMode && !openClawSettings.hasSecureStorage && (
+                  <Alert severity="warning">系统密钥链不可用，Token 将回退为本地明文存储。</Alert>
+                )}
 
-              <Stack direction="row" spacing={1}>
-                <Button variant="contained" onClick={saveOpenClawSettings} disabled={settingsSaving || settingsTesting}>
-                  {settingsSaving ? '保存中...' : '保存设置'}
-                </Button>
-                <Button variant="outlined" onClick={testOpenClawSettings} disabled={settingsSaving || settingsTesting}>
-                  {settingsTesting ? '测试中...' : '连接测试'}
-                </Button>
-                <Button
-                  variant="text"
-                  color="warning"
-                  onClick={clearSavedToken}
-                  disabled={settingsSaving || settingsTesting || !openClawSettings.hasToken}
-                >
-                  清除 Token
-                </Button>
+                <TextField
+                  label="OpenClaw Base URL"
+                  value={openClawSettings.baseUrl}
+                  onChange={(event) => handleOpenClawSettingChange('baseUrl', event.target.value)}
+                  placeholder="http://127.0.0.1:18789"
+                  fullWidth
+                />
+
+                <TextField
+                  label="OpenClaw Token"
+                  value={openClawSettings.token}
+                  onChange={(event) => handleOpenClawSettingChange('token', event.target.value)}
+                  type="password"
+                  autoComplete="off"
+                  placeholder={openClawSettings.hasToken ? '已保存（留空表示不修改）' : ''}
+                  fullWidth
+                />
+
+                <TextField
+                  label="OpenClaw Agent ID"
+                  value={openClawSettings.agentId}
+                  onChange={(event) => handleOpenClawSettingChange('agentId', event.target.value)}
+                  placeholder="main"
+                  fullWidth
+                />
+
+                <Stack direction="row" spacing={1}>
+                  <Button variant="contained" onClick={saveOpenClawSettings} disabled={settingsSaving || settingsTesting}>
+                    {settingsSaving ? '保存中...' : '保存设置'}
+                  </Button>
+                  <Button variant="outlined" onClick={testOpenClawSettings} disabled={settingsSaving || settingsTesting}>
+                    {settingsTesting ? '测试中...' : '连接测试'}
+                  </Button>
+                  <Button
+                    variant="text"
+                    color="warning"
+                    onClick={clearSavedToken}
+                    disabled={settingsSaving || settingsTesting || !openClawSettings.hasToken}
+                  >
+                    清除 Token
+                  </Button>
+                </Stack>
+
+                {settingsError && <Alert severity="error">{settingsError}</Alert>}
+                {settingsFeedback && <Alert severity="success">{settingsFeedback}</Alert>}
               </Stack>
-
-              {settingsError && <Alert severity="error">{settingsError}</Alert>}
-              {settingsFeedback && <Alert severity="success">{settingsFeedback}</Alert>}
-            </Stack>
+            )}
           </Stack>
         </DialogContent>
       </Dialog>
