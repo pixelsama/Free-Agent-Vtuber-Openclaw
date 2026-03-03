@@ -108,32 +108,31 @@ export default function PetShell({
           onModelError={onModelError}
           className="live2d-viewer"
         />
-      </Box>
-
-      <Box
-        className="pet-hitbox-controls"
-        {...bindPetHover?.('pet-bottom-controls')}
-        onPointerDownCapture={(event) => {
-          event.stopPropagation();
-        }}
-      >
-        <IconButton
-          className="mode-toggle pet-mode-toggle"
-          color="primary"
-          onClick={() => {
-            void onSwitchToWindowMode?.();
+        <Box
+          className="pet-hitbox-controls"
+          {...bindPetHover?.('pet-bottom-controls')}
+          onPointerDownCapture={(event) => {
+            event.stopPropagation();
           }}
-          title="切换到主窗口模式"
         >
-          <SwapHorizIcon />
-        </IconButton>
-        <EdgeComposer
-          variant="pet"
-          onExpandedChange={(expanded) => {
-            setPetHover?.('pet-composer', expanded);
-          }}
-          {...textComposerProps}
-        />
+          <IconButton
+            className="mode-toggle pet-mode-toggle"
+            color="primary"
+            onClick={() => {
+              void onSwitchToWindowMode?.();
+            }}
+            title="切换到主窗口模式"
+          >
+            <SwapHorizIcon />
+          </IconButton>
+          <EdgeComposer
+            variant="pet"
+            onExpandedChange={(expanded) => {
+              setPetHover?.('pet-composer', expanded);
+            }}
+            {...textComposerProps}
+          />
+        </Box>
       </Box>
 
       <SubtitleBar text={subtitleText} />

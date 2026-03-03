@@ -57,8 +57,8 @@ body,
 
 .live2d-stage.pet-mode .pet-hitbox-controls {
   position: absolute;
-  right: clamp(16px, 2.2vw, 28px);
-  bottom: clamp(28px, 4.2vh, 56px);
+  left: clamp(-72px, -5.2vw, -40px);
+  top: clamp(128px, 36%, 256px);
   display: flex;
   flex-direction: column;
   align-items: center;
