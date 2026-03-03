@@ -55,6 +55,18 @@ body,
   cursor: inherit;
 }
 
+.live2d-stage.pet-mode .pet-hitbox-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 8;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
 .live2d-stage.pet-mode .subtitle-container {
   bottom: 20px;
 }
@@ -99,11 +111,6 @@ body,
 .mode-toggle {
   position: relative !important;
   background: rgba(255, 255, 255, 0.85) !important;
-}
-
-.pet-bottom-controls {
-  right: 16px;
-  bottom: 16px;
 }
 
 .pet-mode-toggle {

@@ -58,22 +58,28 @@ export default function PetShell({
           onModelError={onModelError}
           className="live2d-viewer"
         />
-      </Box>
 
-      <Box className="window-bottom-controls pet-bottom-controls" {...bindPetHover?.('pet-bottom-controls')}>
-        <IconButton
-          className="mode-toggle pet-mode-toggle"
-          color="primary"
-          onClick={() => {
-            void onSwitchToWindowMode?.();
+        <Box
+          className="pet-hitbox-controls"
+          {...bindPetHover?.('pet-bottom-controls')}
+          onPointerDownCapture={(event) => {
+            event.stopPropagation();
           }}
-          title="切换到主窗口模式"
         >
-          <SwapHorizIcon />
-        </IconButton>
-        <IconButton className="text-toggle" color="primary" onClick={onOpenTextInputDialog}>
-          <EditIcon />
-        </IconButton>
+          <IconButton
+            className="mode-toggle pet-mode-toggle"
+            color="primary"
+            onClick={() => {
+              void onSwitchToWindowMode?.();
+            }}
+            title="切换到主窗口模式"
+          >
+            <SwapHorizIcon />
+          </IconButton>
+          <IconButton className="text-toggle" color="primary" onClick={onOpenTextInputDialog}>
+            <EditIcon />
+          </IconButton>
+        </Box>
       </Box>
 
       <SubtitleBar text={subtitleText} />

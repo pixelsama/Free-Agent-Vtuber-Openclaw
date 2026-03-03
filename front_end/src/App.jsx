@@ -375,6 +375,10 @@ function AppContent({ desktopMode }) {
     setShowTextInputDialog(false);
   }, [isPetMode]);
 
+  useEffect(() => {
+    setModelLoaded(false);
+  }, [isPetMode]);
+
   return (
     <Box sx={stageStyle}>
       {isPetMode ? (
