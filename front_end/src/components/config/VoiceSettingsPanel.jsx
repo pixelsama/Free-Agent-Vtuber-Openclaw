@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, Chip, Stack, TextField } from '@mui/material';
 import { useI18n } from '../../i18n/I18nContext.jsx';
 import { useSileroVad } from '../../hooks/voice/useSileroVad.js';
@@ -49,7 +49,11 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   const { t } = useI18n();
   const seqRef = useRef(0);
   const chunkIdRef = useRef(0);
+  const speechQueueRef = useRef(Promise.resolve());
+  const runEpochRef = useRef(0);
+  const mountedRef = useRef(true);
   const [capturedFrames, setCapturedFrames] = useState(0);
+  const [isProcessingSpeech, setIsProcessingSpeech] = useState(false);
 
   const {
     sessionId,
@@ -77,38 +81,79 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
 
   const statusColor = useMemo(() => STATUS_CHIP_COLOR[status] || 'default', [status]);
 
-  const handleSpeechEnd = useCallback(
-    async (audioFloat32) => {
-      const chunks = splitFloat32ToPcmChunks(audioFloat32, 320);
-      if (!chunks.length) {
-        return;
-      }
-
-      for (const pcmChunk of chunks) {
-        seqRef.current += 1;
-        chunkIdRef.current += 1;
-        setCapturedFrames((value) => value + 1);
-
-        const sent = await sendAudioChunk({
-          seq: seqRef.current,
-          chunkId: chunkIdRef.current,
-          pcmChunk,
-          sampleRate: 16000,
-          channels: 1,
-          sampleFormat: 'pcm_s16le',
-          isSpeech: true,
-        });
-
-        if (!sent?.ok) {
+  const enqueueSpeechTask = useCallback((task) => {
+    speechQueueRef.current = speechQueueRef.current
+      .then(async () => {
+        if (!mountedRef.current) {
           return;
         }
-      }
 
-      await commitInput({
-        finalSeq: seqRef.current,
+        setIsProcessingSpeech(true);
+        try {
+          await task();
+        } finally {
+          if (mountedRef.current) {
+            setIsProcessingSpeech(false);
+          }
+        }
+      })
+      .catch((error) => {
+        console.error('Voice speech pipeline failed:', error);
+        if (mountedRef.current) {
+          setIsProcessingSpeech(false);
+        }
       });
-    },
-    [commitInput, sendAudioChunk],
+
+    return speechQueueRef.current;
+  }, []);
+
+  const handleSpeechEnd = useCallback(
+    async (audioFloat32, epoch) =>
+      enqueueSpeechTask(async () => {
+        if (epoch !== runEpochRef.current) {
+          return;
+        }
+
+        const chunks = splitFloat32ToPcmChunks(audioFloat32, 320);
+        if (!chunks.length) {
+          return;
+        }
+
+        for (const pcmChunk of chunks) {
+          if (epoch !== runEpochRef.current) {
+            return;
+          }
+
+          seqRef.current += 1;
+          chunkIdRef.current += 1;
+          if (mountedRef.current) {
+            setCapturedFrames((value) => value + 1);
+          }
+
+          const sent = await sendAudioChunk({
+            seq: seqRef.current,
+            chunkId: chunkIdRef.current,
+            pcmChunk,
+            sampleRate: 16000,
+            channels: 1,
+            sampleFormat: 'pcm_s16le',
+            isSpeech: true,
+          });
+
+          if (!sent?.ok) {
+            return;
+          }
+        }
+
+        if (epoch !== runEpochRef.current) {
+          return;
+        }
+
+        await commitInput({
+          finalSeq: seqRef.current,
+        });
+      }),
+    [commitInput, enqueueSpeechTask, sendAudioChunk],
   );
 
   const handleStart = useCallback(async () => {
@@ -120,27 +165,33 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
     seqRef.current = 0;
     chunkIdRef.current = 0;
     setCapturedFrames(0);
+    const nextEpoch = runEpochRef.current + 1;
+    runEpochRef.current = nextEpoch;
 
     const vadStarted = await startVad({
-      onSpeechEnd: handleSpeechEnd,
+      onSpeechEnd: async (audioFloat32) => handleSpeechEnd(audioFloat32, nextEpoch),
     });
 
     if (!vadStarted?.ok) {
+      runEpochRef.current += 1;
       await stopSession({ reason: 'vad_start_failed' });
     }
   }, [handleSpeechEnd, startSession, startVad, stopSession]);
 
   const handleCommit = useCallback(async () => {
-    if (!active) {
-      return;
-    }
+    await enqueueSpeechTask(async () => {
+      if (!active) {
+        return;
+      }
 
-    await commitInput({
-      finalSeq: seqRef.current,
+      await commitInput({
+        finalSeq: seqRef.current,
+      });
     });
-  }, [active, commitInput]);
+  }, [active, commitInput, enqueueSpeechTask]);
 
   const handleStop = useCallback(async () => {
+    runEpochRef.current += 1;
     await stopVad();
     await stopSession({ reason: 'manual' });
     seqRef.current = 0;
@@ -151,6 +202,16 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   const handleStopTts = useCallback(async () => {
     await stopTts({ reason: 'manual' });
   }, [stopTts]);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      runEpochRef.current += 1;
+      void stopVad();
+      void stopSession({ reason: 'panel_unmount' });
+    },
+    [stopSession, stopVad],
+  );
 
   return (
     <Stack spacing={2}>
@@ -193,10 +254,14 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
       <TextField label={t('voice.capturedFrames')} value={capturedFrames} disabled fullWidth />
 
       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-        <Button variant="contained" onClick={handleStart} disabled={!desktopMode || active || isVadLoading}>
+        <Button
+          variant="contained"
+          onClick={handleStart}
+          disabled={!desktopMode || active || isVadLoading || isProcessingSpeech}
+        >
           {t('voice.startSession')}
         </Button>
-        <Button variant="outlined" onClick={handleCommit} disabled={!desktopMode || !active}>
+        <Button variant="outlined" onClick={handleCommit} disabled={!desktopMode || !active || isProcessingSpeech}>
           {t('voice.commitInput')}
         </Button>
         <Button variant="outlined" color="warning" onClick={handleStopTts} disabled={!desktopMode || !active}>

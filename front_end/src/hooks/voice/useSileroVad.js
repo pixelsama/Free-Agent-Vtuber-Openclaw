@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MicVAD } from '@ricky0123/vad-web';
 
 const DEFAULT_VAD_MODEL = 'v5';
@@ -85,6 +85,17 @@ export function useSileroVad() {
       setIsSpeaking(false);
     }
   }, []);
+
+  useEffect(
+    () => () => {
+      const vad = vadRef.current;
+      vadRef.current = null;
+      if (vad) {
+        void vad.destroy().catch(() => {});
+      }
+    },
+    [],
+  );
 
   return useMemo(
     () => ({

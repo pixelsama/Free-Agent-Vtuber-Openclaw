@@ -189,6 +189,22 @@ function registerVoiceSessionIpc({
       };
     }
 
+    if (sessionState.status === SESSION_STATUS_TRANSCRIBING) {
+      return {
+        ok: false,
+        reason: 'transcribing_in_progress',
+      };
+    }
+
+    const committedChunks = sessionState.audioChunks;
+    if (!committedChunks.length) {
+      return {
+        ok: false,
+        reason: 'empty_audio',
+      };
+    }
+    sessionState.audioChunks = [];
+
     sessionState.status = SESSION_STATUS_TRANSCRIBING;
     sendState(sessionId, sessionState.status);
     sessionState.asrController = new AbortController();
@@ -196,7 +212,7 @@ function registerVoiceSessionIpc({
     try {
       let partialSeq = 0;
       const result = await asrService.transcribe({
-        audioChunks: sessionState.audioChunks,
+        audioChunks: committedChunks,
         signal: sessionState.asrController.signal,
         onPartial: (text) => {
           partialSeq += 1;
@@ -239,7 +255,6 @@ function registerVoiceSessionIpc({
       }
 
       sendDone(sessionId, 'transcribing');
-      sessionState.audioChunks = [];
       if (sessionState.status !== SESSION_STATUS_SPEAKING) {
         sessionState.status = SESSION_STATUS_LISTENING;
         sendState(sessionId, sessionState.status);
@@ -250,6 +265,7 @@ function registerVoiceSessionIpc({
         text: finalText,
       };
     } catch (error) {
+      sessionState.audioChunks = committedChunks.concat(sessionState.audioChunks);
       const payload = toVoiceError(error, 'voice_asr_failed', 'transcribing');
       sendError(sessionId, payload);
       sessionState.status = SESSION_STATUS_ERROR;

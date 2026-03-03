@@ -95,3 +95,80 @@ test('voice playback ack emits flow-control pause/resume', async () => {
   assert.equal(flowEvents[0].action, 'pause');
   assert.equal(flowEvents[1].action, 'resume');
 });
+
+test('voice commit is serialized and does not mix chunks across turns', async () => {
+  const ipcMain = createIpcMainMock();
+  const chunkSeqsPerCommit = [];
+  let resolveFirstCommit;
+
+  registerVoiceSessionIpc({
+    ipcMain,
+    emitEvent: () => {},
+    createAsrServiceImpl: () => ({
+      transcribe: async ({ audioChunks }) => {
+        chunkSeqsPerCommit.push(audioChunks.map((chunk) => chunk.seq));
+        if (chunkSeqsPerCommit.length === 1) {
+          return new Promise((resolve) => {
+            resolveFirstCommit = () => resolve({ text: 'first' });
+          });
+        }
+
+        return { text: 'second' };
+      },
+    }),
+  });
+
+  await ipcMain.invoke('voice:session:start', {
+    sessionId: 's3',
+    mode: 'vad',
+  });
+
+  await ipcMain.invoke('voice:audio:chunk', {
+    sessionId: 's3',
+    seq: 1,
+    chunkId: 1,
+    pcmChunk: Buffer.from([1, 2]),
+    sampleRate: 16000,
+    channels: 1,
+    sampleFormat: 'pcm_s16le',
+    isSpeech: true,
+  });
+
+  const firstCommitPromise = ipcMain.invoke('voice:input:commit', {
+    sessionId: 's3',
+    finalSeq: 1,
+  });
+  await Promise.resolve();
+
+  await ipcMain.invoke('voice:audio:chunk', {
+    sessionId: 's3',
+    seq: 2,
+    chunkId: 2,
+    pcmChunk: Buffer.from([3, 4]),
+    sampleRate: 16000,
+    channels: 1,
+    sampleFormat: 'pcm_s16le',
+    isSpeech: true,
+  });
+
+  const overlappingCommit = await ipcMain.invoke('voice:input:commit', {
+    sessionId: 's3',
+    finalSeq: 2,
+  });
+  assert.equal(overlappingCommit.ok, false);
+  assert.equal(overlappingCommit.reason, 'transcribing_in_progress');
+
+  resolveFirstCommit();
+  const firstCommit = await firstCommitPromise;
+  assert.equal(firstCommit.ok, true);
+  assert.equal(firstCommit.text, 'first');
+
+  const secondCommit = await ipcMain.invoke('voice:input:commit', {
+    sessionId: 's3',
+    finalSeq: 2,
+  });
+  assert.equal(secondCommit.ok, true);
+  assert.equal(secondCommit.text, 'second');
+
+  assert.deepEqual(chunkSeqsPerCommit, [[1], [2]]);
+});
