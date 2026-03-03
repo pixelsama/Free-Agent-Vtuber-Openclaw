@@ -4,6 +4,7 @@ const { app, BrowserWindow, shell, ipcMain, protocol, screen } = require('electr
 const { registerChatStreamIpc } = require('./ipc/chatStream');
 const { registerLive2DModelsIpc } = require('./ipc/live2dModels');
 const { registerSettingsIpc } = require('./ipc/settings');
+const { registerVoiceSessionIpc } = require('./ipc/voiceSession');
 const { Live2DModelLibrary, MODEL_PROTOCOL } = require('./services/live2dModelLibrary');
 const { SettingsStore } = require('./services/settingsStore');
 const { WindowModeManager } = require('./window/windowModeManager');
@@ -27,6 +28,7 @@ let mainWindow = null;
 let disposeChatStreamHandlers = null;
 let disposeModeHandlers = null;
 let disposeLive2DModelsHandlers = null;
+let disposeVoiceSessionHandlers = null;
 let settingsStore = null;
 let windowModeManager = null;
 let trayManager = null;
@@ -255,6 +257,24 @@ async function bootstrap() {
     },
   });
 
+  disposeVoiceSessionHandlers = registerVoiceSessionIpc({
+    ipcMain,
+    emitEvent: (payload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+
+      mainWindow.webContents.send('voice:event', payload);
+    },
+    emitFlowControl: (payload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+
+      mainWindow.webContents.send('voice:flow-control', payload);
+    },
+  });
+
   await createMainWindow();
 
   app.on('activate', async () => {
@@ -293,6 +313,9 @@ app.on('before-quit', () => {
   }
   if (disposeLive2DModelsHandlers) {
     disposeLive2DModelsHandlers();
+  }
+  if (disposeVoiceSessionHandlers) {
+    disposeVoiceSessionHandlers();
   }
 
   ipcMain.removeHandler('window:get-platform');

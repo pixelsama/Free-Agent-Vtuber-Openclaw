@@ -311,6 +311,82 @@ export const desktopBridge = {
       });
     },
   },
+  voice: {
+    async start({ sessionId, mode = 'vad' } = {}) {
+      const api = getDesktopApi();
+      if (!api?.voice?.startSession) {
+        return { ok: false, reason: 'desktop_voice_unavailable' };
+      }
+      return api.voice.startSession({ sessionId, mode });
+    },
+    async sendAudioChunk({
+      sessionId,
+      seq,
+      chunkId,
+      pcmChunk,
+      sampleRate = 16000,
+      channels = 1,
+      sampleFormat = 'pcm_s16le',
+      isSpeech = false,
+    } = {}) {
+      const api = getDesktopApi();
+      if (!api?.voice?.sendAudioChunk) {
+        return { ok: false, reason: 'desktop_voice_unavailable' };
+      }
+      return api.voice.sendAudioChunk({
+        sessionId,
+        seq,
+        chunkId,
+        pcmChunk,
+        sampleRate,
+        channels,
+        sampleFormat,
+        isSpeech,
+      });
+    },
+    async commit({ sessionId, finalSeq } = {}) {
+      const api = getDesktopApi();
+      if (!api?.voice?.commitInput) {
+        return { ok: false, reason: 'desktop_voice_unavailable' };
+      }
+      return api.voice.commitInput({ sessionId, finalSeq });
+    },
+    async stop({ sessionId, reason = 'manual' } = {}) {
+      const api = getDesktopApi();
+      if (!api?.voice?.stopSession) {
+        return { ok: false, reason: 'desktop_voice_unavailable' };
+      }
+      return api.voice.stopSession({ sessionId, reason });
+    },
+    async stopTts({ sessionId, reason = 'manual' } = {}) {
+      const api = getDesktopApi();
+      if (!api?.voice?.stopTts) {
+        return { ok: false, reason: 'desktop_voice_unavailable' };
+      }
+      return api.voice.stopTts({ sessionId, reason });
+    },
+    async sendPlaybackAck({ sessionId, ackSeq, bufferedMs } = {}) {
+      const api = getDesktopApi();
+      if (!api?.voice?.sendPlaybackAck) {
+        return { ok: false, reason: 'desktop_voice_unavailable' };
+      }
+      return api.voice.sendPlaybackAck({ sessionId, ackSeq, bufferedMs });
+    },
+    onEvent(handler) {
+      const api = getDesktopApi();
+      if (!api?.voice?.onEvent || typeof handler !== 'function') {
+        return () => {};
+      }
+      return api.voice.onEvent(handler);
+    },
+    onFlowControl(handler) {
+      const api = getDesktopApi();
+      if (!api?.voice?.onFlowControl || typeof handler !== 'function') {
+        return () => {};
+      }
+      return api.voice.onFlowControl(handler);
+    },
+  },
   window: {
     getPlatformSync() {
       const api = getDesktopApi();

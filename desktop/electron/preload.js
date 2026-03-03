@@ -97,6 +97,33 @@ const windowControls = {
   },
 };
 
+const voice = {
+  startSession(request) {
+    return ipcRenderer.invoke('voice:session:start', request);
+  },
+  sendAudioChunk(request) {
+    return ipcRenderer.invoke('voice:audio:chunk', request);
+  },
+  commitInput(request) {
+    return ipcRenderer.invoke('voice:input:commit', request);
+  },
+  stopSession(request) {
+    return ipcRenderer.invoke('voice:session:stop', request);
+  },
+  stopTts(request) {
+    return ipcRenderer.invoke('voice:tts:stop', request);
+  },
+  sendPlaybackAck(request) {
+    return ipcRenderer.invoke('voice:playback:ack', request);
+  },
+  onEvent(handler) {
+    return onChannel('voice:event', handler);
+  },
+  onFlowControl(handler) {
+    return onChannel('voice:flow-control', handler);
+  },
+};
+
 const live2dModels = {
   list() {
     return ipcRenderer.invoke('live2d-models:list');
@@ -113,5 +140,6 @@ contextBridge.exposeInMainWorld('desktop', {
   settings,
   windowMode,
   windowControls,
+  voice,
   live2dModels,
 });

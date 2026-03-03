@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import Live2DControls from '../controls/Live2DControls.jsx';
+import VoiceSettingsPanel from './VoiceSettingsPanel.jsx';
 import {
   LANGUAGE_EN_US,
   LANGUAGE_ZH_CN,
@@ -92,6 +93,7 @@ export default function ConfigDrawer({
             <Tabs value={activeConfigTab} onChange={(_event, tab) => setActiveConfigTab(tab)} variant="fullWidth">
               <Tab label={t('app.tab.live2d')} />
               <Tab label={t('app.tab.openclaw')} />
+              <Tab label={t('app.tab.voice')} />
               <Tab label={t('app.tab.preferences')} />
             </Tabs>
             <Divider />
@@ -197,6 +199,10 @@ export default function ConfigDrawer({
             )}
 
             {activeConfigTab === 2 && (
+              <VoiceSettingsPanel desktopMode={desktopMode} />
+            )}
+
+            {activeConfigTab === 3 && (
               <Stack spacing={2}>
                 <Box sx={{ fontWeight: 600 }}>{t('preferences.title')}</Box>
                 <Stack spacing={1}>

@@ -1,0 +1,147 @@
+import { useCallback, useMemo, useRef } from 'react';
+import { Alert, Box, Button, Chip, Stack, TextField } from '@mui/material';
+import { useI18n } from '../../i18n/I18nContext.jsx';
+import { useVoiceCapture } from '../../hooks/voice/useVoiceCapture.js';
+import { useVoiceSession } from '../../hooks/voice/useVoiceSession.js';
+
+const STATUS_CHIP_COLOR = {
+  idle: 'default',
+  listening: 'info',
+  transcribing: 'warning',
+  speaking: 'success',
+  error: 'error',
+};
+
+export default function VoiceSettingsPanel({ desktopMode = false }) {
+  const { t } = useI18n();
+  const seqRef = useRef(0);
+  const chunkIdRef = useRef(0);
+
+  const {
+    sessionId,
+    status,
+    active,
+    lastPartialText,
+    lastFinalText,
+    lastError,
+    flowControl,
+    startSession,
+    sendAudioChunk,
+    commitInput,
+    stopSession,
+    stopTts,
+  } = useVoiceSession({ desktopMode });
+
+  const { permission, isCapturing, captureError, startCapture, stopCapture } = useVoiceCapture();
+
+  const statusColor = useMemo(() => STATUS_CHIP_COLOR[status] || 'default', [status]);
+
+  const handleStart = useCallback(async () => {
+    const started = await startSession({ mode: 'vad' });
+    if (!started?.ok) {
+      return;
+    }
+
+    await startCapture();
+  }, [startCapture, startSession]);
+
+  const handleCommit = useCallback(async () => {
+    if (!active) {
+      return;
+    }
+
+    seqRef.current += 1;
+    chunkIdRef.current += 1;
+
+    await sendAudioChunk({
+      seq: seqRef.current,
+      chunkId: chunkIdRef.current,
+      pcmChunk: Uint8Array.from([1, 2, 3, 4]),
+      sampleRate: 16000,
+      channels: 1,
+      sampleFormat: 'pcm_s16le',
+      isSpeech: true,
+    });
+
+    await commitInput({
+      finalSeq: seqRef.current,
+    });
+  }, [active, commitInput, sendAudioChunk]);
+
+  const handleStop = useCallback(async () => {
+    stopCapture();
+    await stopSession({ reason: 'manual' });
+    seqRef.current = 0;
+    chunkIdRef.current = 0;
+  }, [stopCapture, stopSession]);
+
+  const handleStopTts = useCallback(async () => {
+    await stopTts({ reason: 'manual' });
+  }, [stopTts]);
+
+  return (
+    <Stack spacing={2}>
+      <Box sx={{ fontWeight: 600 }}>{t('voice.title')}</Box>
+      <Alert severity="info">{t('voice.phase0Hint')}</Alert>
+      {!desktopMode && <Alert severity="warning">{t('voice.desktopOnly')}</Alert>}
+      {desktopMode && <Alert severity="info">{t('voice.mockCommitHint')}</Alert>}
+
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Chip size="small" color={statusColor} label={`${t('voice.status')}: ${status}`} />
+        <Chip
+          size="small"
+          color={isCapturing ? 'success' : 'default'}
+          label={isCapturing ? t('voice.captureOn') : t('voice.captureOff')}
+        />
+      </Stack>
+
+      <TextField
+        label={t('voice.sessionId')}
+        value={sessionId}
+        placeholder={t('voice.sessionIdPlaceholder')}
+        disabled
+        fullWidth
+      />
+      <TextField label={t('voice.permission')} value={permission} disabled fullWidth />
+      <TextField
+        label={t('voice.flowControl')}
+        value={`${flowControl.action} (${flowControl.bufferedMs}ms)`}
+        disabled
+        fullWidth
+      />
+
+      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+        <Button variant="contained" onClick={handleStart} disabled={!desktopMode || active}>
+          {t('voice.startSession')}
+        </Button>
+        <Button variant="outlined" onClick={handleCommit} disabled={!desktopMode || !active}>
+          {t('voice.commitInput')}
+        </Button>
+        <Button variant="outlined" color="warning" onClick={handleStopTts} disabled={!desktopMode || !active}>
+          {t('voice.stopTts')}
+        </Button>
+        <Button variant="text" color="error" onClick={handleStop} disabled={!desktopMode || !active}>
+          {t('voice.stopSession')}
+        </Button>
+      </Stack>
+
+      <TextField
+        label={t('voice.partialText')}
+        value={lastPartialText}
+        placeholder={t('voice.empty')}
+        disabled
+        fullWidth
+      />
+      <TextField
+        label={t('voice.finalText')}
+        value={lastFinalText}
+        placeholder={t('voice.empty')}
+        disabled
+        fullWidth
+      />
+
+      {!!lastError && <Alert severity="error">{lastError}</Alert>}
+      {!!captureError && <Alert severity="warning">{captureError}</Alert>}
+    </Stack>
+  );
+}
