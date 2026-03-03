@@ -578,8 +578,35 @@ const Live2DViewer = forwardRef(function Live2DViewer(
 
     initLive2D();
     window.addEventListener('resize', handleResize);
+    let resizeObserver = null;
+    let resizeRafId = null;
+
+    const scheduleResize = () => {
+      if (resizeRafId) {
+        cancelAnimationFrame(resizeRafId);
+      }
+      resizeRafId = requestAnimationFrame(() => {
+        resizeRafId = null;
+        handleResize();
+      });
+    };
+
+    const container = live2dContainerRef.current;
+    if (container && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        scheduleResize();
+      });
+      resizeObserver.observe(container);
+    }
+
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+      if (resizeRafId) {
+        cancelAnimationFrame(resizeRafId);
+      }
       cleanup();
     };
   }, [cleanup, handleResize, initLive2D, modelPath]);
