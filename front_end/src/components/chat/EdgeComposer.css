@@ -7,7 +7,7 @@
 }
 
 .edge-composer-toggle {
-  background: rgba(255, 255, 255, 0.85) !important;
+  background: var(--floating-button-bg, rgba(255, 255, 255, 0.85)) !important;
 }
 
 .edge-composer-panel {

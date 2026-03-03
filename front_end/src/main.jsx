@@ -12,6 +12,14 @@ import './styles.css';
 function ThemedApp() {
   const { resolvedThemeMode } = useThemeMode();
 
+  React.useEffect(() => {
+    document.documentElement.setAttribute('data-theme-mode', resolvedThemeMode);
+
+    return () => {
+      document.documentElement.removeAttribute('data-theme-mode');
+    };
+  }, [resolvedThemeMode]);
+
   const theme = React.useMemo(
     () =>
       createTheme({

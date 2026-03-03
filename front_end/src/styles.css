@@ -2,6 +2,30 @@
   box-sizing: border-box;
 }
 
+:root {
+  --floating-button-bg: rgba(245, 249, 255, 0.88);
+  --floating-button-bg-strong: rgba(252, 254, 255, 0.95);
+  --floating-button-hover-bg: rgba(255, 255, 255, 0.98);
+  --floating-button-active-bg: rgba(233, 242, 255, 0.95);
+  --floating-button-border: rgba(31, 76, 144, 0.26);
+  --floating-button-border-hover: rgba(31, 76, 144, 0.42);
+  --floating-button-shadow: 0 10px 24px rgba(16, 41, 82, 0.2), 0 2px 8px rgba(16, 41, 82, 0.12);
+  --floating-button-shadow-hover: 0 14px 30px rgba(16, 41, 82, 0.26), 0 4px 10px rgba(16, 41, 82, 0.16);
+  --floating-button-shadow-active: 0 8px 18px rgba(16, 41, 82, 0.2), 0 2px 8px rgba(16, 41, 82, 0.12);
+}
+
+:root[data-theme-mode='dark'] {
+  --floating-button-bg: rgba(15, 26, 44, 0.88);
+  --floating-button-bg-strong: rgba(12, 22, 38, 0.94);
+  --floating-button-hover-bg: rgba(24, 40, 64, 0.96);
+  --floating-button-active-bg: rgba(16, 32, 52, 0.96);
+  --floating-button-border: rgba(128, 168, 242, 0.38);
+  --floating-button-border-hover: rgba(146, 186, 255, 0.58);
+  --floating-button-shadow: 0 12px 28px rgba(2, 8, 20, 0.56), 0 2px 8px rgba(2, 8, 20, 0.4);
+  --floating-button-shadow-hover: 0 16px 36px rgba(2, 8, 20, 0.64), 0 3px 10px rgba(2, 8, 20, 0.46);
+  --floating-button-shadow-active: 0 9px 22px rgba(2, 8, 20, 0.58), 0 2px 8px rgba(2, 8, 20, 0.42);
+}
+
 html,
 body,
 #root {
@@ -97,7 +121,7 @@ body,
   top: 56px;
   right: 20px;
   z-index: 24;
-  background: rgba(255, 255, 255, 0.85) !important;
+  background: var(--floating-button-bg) !important;
   -webkit-app-region: no-drag;
 }
 
@@ -115,14 +139,51 @@ body,
 
 .text-toggle {
   position: relative !important;
-  background: rgba(255, 255, 255, 0.85) !important;
+  background: var(--floating-button-bg) !important;
 }
 
 .mode-toggle {
   position: relative !important;
-  background: rgba(255, 255, 255, 0.85) !important;
+  background: var(--floating-button-bg) !important;
 }
 
 .pet-mode-toggle {
-  background: rgba(255, 255, 255, 0.92) !important;
+  background: var(--floating-button-bg-strong) !important;
+}
+
+.config-toggle,
+.text-toggle,
+.mode-toggle,
+.pet-mode-toggle,
+.edge-composer-toggle {
+  border: 1px solid var(--floating-button-border) !important;
+  box-shadow: var(--floating-button-shadow) !important;
+  backdrop-filter: blur(10px) saturate(130%);
+  -webkit-backdrop-filter: blur(10px) saturate(130%);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 120ms ease;
+}
+
+.config-toggle:hover,
+.text-toggle:hover,
+.mode-toggle:hover,
+.pet-mode-toggle:hover,
+.edge-composer-toggle:hover {
+  background: var(--floating-button-hover-bg) !important;
+  border-color: var(--floating-button-border-hover) !important;
+  box-shadow: var(--floating-button-shadow-hover) !important;
+  transform: translateY(-1px);
+}
+
+.config-toggle:active,
+.text-toggle:active,
+.mode-toggle:active,
+.pet-mode-toggle:active,
+.edge-composer-toggle:active {
+  background: var(--floating-button-active-bg) !important;
+  box-shadow: var(--floating-button-shadow-active) !important;
+  transform: translateY(0);
 }
