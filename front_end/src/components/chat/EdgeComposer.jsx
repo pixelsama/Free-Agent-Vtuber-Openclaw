@@ -59,6 +59,7 @@ export default function EdgeComposer({
   const [expanded, setExpanded] = useState(false);
   const [value, setValue] = useState('');
   const [localError, setLocalError] = useState('');
+  const [isImeComposing, setIsImeComposing] = useState(false);
 
   const effectiveError = useMemo(() => localError || externalError || '', [externalError, localError]);
 
@@ -173,7 +174,12 @@ export default function EdgeComposer({
   return (
     <Box
       ref={rootRef}
-      className={['edge-composer', expanded ? 'expanded' : 'collapsed', `edge-composer-${variant}`]
+      className={[
+        'edge-composer',
+        expanded ? 'expanded' : 'collapsed',
+        `edge-composer-${variant}`,
+        isImeComposing ? 'edge-composer-ime-composing' : '',
+      ]
         .filter(Boolean)
         .join(' ')}
       onPointerDownCapture={(event) => {
@@ -216,10 +222,20 @@ export default function EdgeComposer({
             disabled={isStreaming}
             inputProps={{ maxLength: 400 }}
             onKeyDown={(event) => {
+              if (event.nativeEvent?.isComposing || event.keyCode === 229 || isImeComposing) {
+                return;
+              }
+
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 void submit();
               }
+            }}
+            onCompositionStart={() => {
+              setIsImeComposing(true);
+            }}
+            onCompositionEnd={() => {
+              setIsImeComposing(false);
             }}
             fullWidth
           />
