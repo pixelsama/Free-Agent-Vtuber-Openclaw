@@ -7,6 +7,7 @@ import Live2DViewer from '../components/live2d/Live2DViewer.jsx';
 import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import { usePetDraggable } from '../hooks/pet/usePetDraggable.js';
 import EdgeComposer from '../components/chat/EdgeComposer.jsx';
+import { useI18n } from '../i18n/I18nContext.jsx';
 
 export default function PetShell({
   desktopMode,
@@ -23,6 +24,7 @@ export default function PetShell({
   setPetHover,
   textComposerProps,
 }) {
+  const { t } = useI18n();
   const modelHoverRef = useRef(false);
   const hitboxRef = useRef(null);
   const controlsRef = useRef(null);
@@ -224,7 +226,7 @@ export default function PetShell({
             onClick={() => {
               void onSwitchToWindowMode?.();
             }}
-            title="切换到主窗口模式"
+            title={t('pet.switchToWindowMode')}
           >
             <SwapHorizIcon />
           </IconButton>
@@ -234,7 +236,7 @@ export default function PetShell({
             onClick={() => {
               setIsModelLocked((prev) => !prev);
             }}
-            title={isModelLocked ? '已锁定（点击解锁）' : '未锁定（点击锁定）'}
+            title={isModelLocked ? t('pet.lockedTitle') : t('pet.unlockedTitle')}
           >
             {isModelLocked ? <LockIcon /> : <LockOpenIcon />}
           </IconButton>

@@ -13,6 +13,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import MoodIcon from '@mui/icons-material/Mood';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import { useI18n } from '../../i18n/I18nContext.jsx';
 
 export default function ExpressionPanel({
   modelLoaded,
@@ -32,35 +33,36 @@ export default function ExpressionPanel({
   onSetExpression,
   onOpenClickAreaAssociation,
 }) {
+  const { t } = useI18n();
   return (
     <Accordion>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center">
           <MoodIcon fontSize="small" />
-          <Typography sx={{ fontWeight: 600 }}>表情控制</Typography>
-          <Chip size="small" label={`${expressions.length} 个`} />
+          <Typography sx={{ fontWeight: 600 }}>{t('expression.title')}</Typography>
+          <Chip size="small" label={t('common.countItems', { count: expressions.length })} />
         </Stack>
       </AccordionSummary>
       <AccordionDetails>
         <Stack spacing={2}>
           <TextField
-            label="手动输入表情文件名（可选）"
+            label={t('expression.manualInput')}
             value={manualExpressionFiles}
             onChange={(event) => onManualExpressionFilesChange(event.target.value)}
             multiline
             minRows={3}
-            placeholder={'留空可自动解析 model3.json；或每行一个文件名，例如:\nsmile_01\nangry_01'}
+            placeholder={t('expression.manualPlaceholder')}
             size="small"
             fullWidth
           />
           <Button variant="outlined" onClick={onParseManualExpressionFiles} disabled={isParsingModelFiles}>
-            {isParsingModelFiles ? '解析中...' : '自动解析（model3.json）/手动解析'}
+            {isParsingModelFiles ? t('expression.parsing') : t('expression.parse')}
           </Button>
 
           {availableExpressionFiles.length > 0 && (
             <Box>
               <Typography variant="body2" sx={{ mb: 1 }}>
-                可用表情文件
+                {t('expression.availableFiles')}
               </Typography>
               <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                 {availableExpressionFiles.map((file) => (
@@ -72,14 +74,14 @@ export default function ExpressionPanel({
 
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
             <TextField
-              label="新表情名称"
+              label={t('expression.newName')}
               value={newExpressionName}
               onChange={(event) => onNewExpressionNameChange(event.target.value)}
               size="small"
               fullWidth
             />
             <Button variant="outlined" onClick={onAddExpression} disabled={!newExpressionName.trim()}>
-              添加表情
+              {t('expression.add')}
             </Button>
           </Stack>
 
@@ -99,7 +101,7 @@ export default function ExpressionPanel({
                     onClick={() => onRemoveExpression(expression.id)}
                     disabled={expressions.length <= 1}
                   >
-                    删除
+                    {t('common.delete')}
                   </Button>
                 </Stack>
 
@@ -120,7 +122,7 @@ export default function ExpressionPanel({
 
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="center">
                   <Button component="label" variant="outlined" size="small" startIcon={<UploadFileIcon />}>
-                    上传表情文件
+                    {t('expression.upload')}
                     <input
                       hidden
                       type="file"
@@ -135,14 +137,14 @@ export default function ExpressionPanel({
                       variant="outlined"
                       onClick={() => onClearExpressionFile(expression.id)}
                     >
-                      清除文件
+                      {t('expression.clearFile')}
                     </Button>
                   )}
                 </Stack>
 
                 {expression.fileName && (
                   <Typography variant="caption" color="success.main">
-                    已关联: {expression.fileName}
+                    {t('expression.linked', { fileName: expression.fileName })}
                   </Typography>
                 )}
 
@@ -153,7 +155,7 @@ export default function ExpressionPanel({
                     disabled={!modelLoaded}
                     onClick={() => onSetExpression(expression.id)}
                   >
-                    应用
+                    {t('expression.apply')}
                   </Button>
                   <Button
                     size="small"
@@ -161,7 +163,7 @@ export default function ExpressionPanel({
                     color="primary"
                     onClick={() => onOpenClickAreaAssociation(expression.id, 'expression')}
                   >
-                    点击区域
+                    {t('expression.clickArea')}
                     {Array.isArray(expression.clickAreas) && expression.clickAreas.length > 0
                       ? ` (${expression.clickAreas.length})`
                       : ''}

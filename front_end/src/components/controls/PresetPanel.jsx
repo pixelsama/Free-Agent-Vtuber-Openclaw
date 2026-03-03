@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SaveIcon from '@mui/icons-material/Save';
+import { useI18n } from '../../i18n/I18nContext.jsx';
 
 export default function PresetPanel({
   newPresetName,
@@ -27,12 +28,13 @@ export default function PresetPanel({
   onImportPreset,
   onHandlePresetFileImport,
 }) {
+  const { t } = useI18n();
   return (
     <Accordion>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center">
           <SaveIcon fontSize="small" />
-          <Typography sx={{ fontWeight: 600 }}>预设管理</Typography>
+          <Typography sx={{ fontWeight: 600 }}>{t('preset.title')}</Typography>
         </Stack>
       </AccordionSummary>
       <AccordionDetails>
@@ -41,18 +43,18 @@ export default function PresetPanel({
             <TextField
               size="small"
               fullWidth
-              label="预设名称"
+              label={t('preset.name')}
               value={newPresetName}
               onChange={(event) => onNewPresetNameChange(event.target.value)}
             />
             <Button variant="outlined" onClick={onSavePreset}>
-              保存预设
+              {t('preset.save')}
             </Button>
           </Stack>
 
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
             <Button variant="outlined" onClick={onImportPreset}>
-              导入预设
+              {t('preset.import')}
             </Button>
             <input
               ref={presetFileInputRef}
@@ -67,7 +69,7 @@ export default function PresetPanel({
 
           {savedPresets.length === 0 && (
             <Typography variant="body2" color="text.secondary">
-              暂无已保存预设
+              {t('preset.empty')}
             </Typography>
           )}
 
@@ -80,13 +82,13 @@ export default function PresetPanel({
                   secondaryAction={
                     <Stack direction="row" spacing={1}>
                       <Button size="small" onClick={() => onLoadPreset(preset)}>
-                        加载
+                        {t('preset.load')}
                       </Button>
                       <Button size="small" onClick={() => onExportPreset(preset)}>
-                        导出
+                        {t('preset.export')}
                       </Button>
                       <Button size="small" color="error" onClick={() => onDeletePreset(preset.name)}>
-                        删除
+                        {t('preset.delete')}
                       </Button>
                     </Stack>
                   }
@@ -94,7 +96,7 @@ export default function PresetPanel({
                   <Box sx={{ mr: 14 }}>
                     <ListItemText
                       primary={preset.name}
-                      secondary={`${preset.modelName || '未知模型'} · ${preset.createdAt || ''}`}
+                      secondary={`${preset.modelName || t('preset.unknownModel')} · ${preset.createdAt || ''}`}
                     />
                   </Box>
                 </ListItem>

@@ -16,7 +16,6 @@ import MotionPanel from './MotionPanel.jsx';
 import ExpressionPanel from './ExpressionPanel.jsx';
 import BackgroundPanel from './BackgroundPanel.jsx';
 import PresetPanel from './PresetPanel.jsx';
-import DebugPanel from './DebugPanel.jsx';
 import {
   CLICK_AREA_COLORS,
   DEFAULT_CLICK_AREAS,
@@ -25,6 +24,7 @@ import {
   STORAGE_KEYS,
 } from './constants.js';
 import { desktopBridge } from '../../services/desktopBridge.js';
+import { toLocaleTag, useI18n } from '../../i18n/I18nContext.jsx';
 import './Live2DControls.css';
 
 const serializeMotion = (motion) => ({
@@ -111,13 +111,13 @@ function makeNewExpressionId(expressions) {
   return `f${String(expressions.length + 1).padStart(2, '0')}`;
 }
 
-function generateDefaultPresetName(selectedModel) {
+function generateDefaultPresetName(selectedModel, localeTag = 'zh-CN', unknownModelName = 'Unknown') {
   const modelName = selectedModel
     ? selectedModel.split('/').pop()?.replace('.model3.json', '')
-    : 'Unknown';
+    : unknownModelName;
   const now = new Date();
   const timestamp = now
-    .toLocaleString('zh-CN', {
+    .toLocaleString(localeTag, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -306,6 +306,8 @@ export default function Live2DControls({
   onModelScaleChange,
   onBackgroundChange,
 }) {
+  const { language, t } = useI18n();
+  const localeTag = toLocaleTag(language);
   const desktopMode = desktopBridge.isDesktop();
 
   const [availableModels, setAvailableModels] = useState([]);
@@ -338,9 +340,6 @@ export default function Live2DControls({
   const [newPresetName, setNewPresetName] = useState('');
   const [isHydrated, setIsHydrated] = useState(false);
 
-  const [debugInfo, setDebugInfo] = useState('Live2D 模型调试信息将在这里显示...');
-  const [isTestingLipSync, setIsTestingLipSync] = useState(false);
-
   const [showClickAreaDialog, setShowClickAreaDialog] = useState(false);
   const [currentAssociationType, setCurrentAssociationType] = useState('motion');
   const [currentAssociationItemId, setCurrentAssociationItemId] = useState(null);
@@ -362,10 +361,7 @@ export default function Live2DControls({
 
   const updateDebugInfo = useCallback((message) => {
     const timestamp = new Date().toLocaleTimeString();
-    setDebugInfo((prev) => {
-      const next = `[${timestamp}] ${message}\n${prev}`;
-      return next.split('\n').slice(0, 10).join('\n');
-    });
+    console.debug(`[Live2DControls][${timestamp}] ${message}`);
   }, []);
 
   const getManager = useCallback(() => {
@@ -404,7 +400,7 @@ export default function Live2DControls({
   const loadAvailableModels = useCallback(async () => {
     if (!desktopMode) {
       setAvailableModels([]);
-      setModelLibraryError('当前环境不支持模型库导入。');
+      setModelLibraryError(t('controls.unsupportedModelImport'));
       return [];
     }
 
@@ -417,10 +413,10 @@ export default function Live2DControls({
     } catch (error) {
       console.error('Failed to load model library:', error);
       setAvailableModels([]);
-      setModelLibraryError('读取模型库失败，请重启后重试。');
+      setModelLibraryError(t('controls.loadModelLibraryFailed'));
       return [];
     }
-  }, [desktopMode]);
+  }, [desktopMode, t]);
 
   const loadSavedPresets = useCallback(() => {
     try {
@@ -581,7 +577,7 @@ export default function Live2DControls({
         } else {
           setAvailableMotionFiles([]);
           setAvailableExpressionFiles([]);
-          updateDebugInfo('尚未导入模型，请先导入 Live2D 模型 ZIP。');
+          updateDebugInfo(t('controls.noModelHint'));
         }
       } catch (error) {
         console.error('Failed to restore state from localStorage:', error);
@@ -605,6 +601,7 @@ export default function Live2DControls({
     onExpressionsUpdate,
     onModelChange,
     onMotionsUpdate,
+    t,
     updateDebugInfo,
   ]);
 
@@ -1102,7 +1099,7 @@ export default function Live2DControls({
 
   const importModelZip = useCallback(async () => {
     if (!desktopMode) {
-      setModelLibraryError('当前环境不支持模型库导入。');
+      setModelLibraryError(t('controls.unsupportedModelImport'));
       return;
     }
 
@@ -1146,7 +1143,7 @@ export default function Live2DControls({
     } finally {
       setIsImportingModel(false);
     }
-  }, [changeModel, desktopMode, loadAvailableModels, onModelChange, selectedModel, updateDebugInfo]);
+  }, [changeModel, desktopMode, loadAvailableModels, onModelChange, selectedModel, t, updateDebugInfo]);
 
   const toggleAutoEyeBlink = useCallback(
     (enabled) => {
@@ -1439,7 +1436,9 @@ export default function Live2DControls({
   }, []);
 
   const savePreset = useCallback(async () => {
-    const presetName = newPresetName.trim() || generateDefaultPresetName(selectedModel);
+    const presetName =
+      newPresetName.trim() ||
+      generateDefaultPresetName(selectedModel, localeTag, t('controls.defaultPresetModel'));
     updateDebugInfo(`开始保存预设: ${presetName}`);
 
     const motionsWithFiles = await Promise.all(
@@ -1468,9 +1467,9 @@ export default function Live2DControls({
 
     const presetData = {
       name: presetName,
-      modelName: selectedModel || '未知模型',
+      modelName: selectedModel || t('controls.defaultPresetModel'),
       timestamp: new Date().toISOString(),
-      createdAt: new Date().toLocaleString('zh-CN'),
+      createdAt: new Date().toLocaleString(localeTag),
       config: {
         selectedModel,
         autoEyeBlink,
@@ -1510,7 +1509,9 @@ export default function Live2DControls({
     modelScale,
     motions,
     newPresetName,
+    localeTag,
     selectedModel,
+    t,
     updateDebugInfo,
   ]);
 
@@ -1663,7 +1664,7 @@ export default function Live2DControls({
 
   const deletePreset = useCallback(
     (presetName) => {
-      if (!window.confirm(`确定要删除预设 "${presetName}" 吗？`)) {
+      if (!window.confirm(t('controls.presetDeleteConfirm', { name: presetName }))) {
         return;
       }
 
@@ -1672,7 +1673,7 @@ export default function Live2DControls({
       localStorage.setItem(STORAGE_KEYS.presetConfigs, JSON.stringify(filtered));
       loadSavedPresets();
     },
-    [loadSavedPresets],
+    [loadSavedPresets, t],
   );
 
   const exportPreset = useCallback((preset) => {
@@ -1700,7 +1701,7 @@ export default function Live2DControls({
         try {
           const presetData = JSON.parse(e.target.result);
           if (!presetData.name || !presetData.config) {
-            window.alert('无效的预设文件格式');
+            window.alert(t('controls.invalidPresetFile'));
             return;
           }
 
@@ -1708,7 +1709,7 @@ export default function Live2DControls({
           const index = existing.findIndex((preset) => preset.name === presetData.name);
 
           if (index >= 0) {
-            if (!window.confirm(`预设 "${presetData.name}" 已存在，是否覆盖？`)) {
+            if (!window.confirm(t('controls.presetExistsOverwrite', { name: presetData.name }))) {
               return;
             }
             existing[index] = presetData;
@@ -1719,39 +1720,19 @@ export default function Live2DControls({
           localStorage.setItem(STORAGE_KEYS.presetConfigs, JSON.stringify(existing));
           loadSavedPresets();
         } catch (error) {
-          window.alert('预设文件格式错误');
+          window.alert(t('controls.presetFormatError'));
           console.error('导入预设失败:', error);
         }
       };
       reader.readAsText(file);
       event.target.value = '';
     },
-    [loadSavedPresets],
+    [loadSavedPresets, t],
   );
 
-  const testLipSync = useCallback(() => {
-    if (!modelLoaded || !live2dViewerRef?.current?.testLipSyncAnimation) {
-      updateDebugInfo('❌ 测试方法不可用，请检查 Live2DViewer 组件');
-      return;
-    }
-
-    live2dViewerRef.current.testLipSyncAnimation();
-    setIsTestingLipSync(true);
-    setTimeout(() => setIsTestingLipSync(false), 5000);
-    updateDebugInfo('🎭 开始测试口型同步动画 (5秒)');
-  }, [live2dViewerRef, modelLoaded, updateDebugInfo]);
-
-  const testRandomMotion = useCallback(() => {
-    if (!modelLoaded || !live2dViewerRef?.current?.testRandomMotion) {
-      updateDebugInfo('❌ 测试方法不可用，请检查 Live2DViewer 组件');
-      return;
-    }
-
-    live2dViewerRef.current.testRandomMotion();
-    updateDebugInfo('🎪 播放随机动作');
-  }, [live2dViewerRef, modelLoaded, updateDebugInfo]);
-
-  const statusChip = selectedModel ? (modelLoaded ? '模型已加载' : '加载中') : '未加载模型';
+  const statusChip = selectedModel
+    ? (modelLoaded ? t('model.status.loaded') : t('model.status.loading'))
+    : t('model.status.unloaded');
 
   return (
     <Box className="live2d-controls-root">
@@ -1841,23 +1822,16 @@ export default function Live2DControls({
           onClearAllCache={clearAllCache}
         />
 
-        <DebugPanel
-          debugInfo={debugInfo}
-          modelLoaded={modelLoaded}
-          isTestingLipSync={isTestingLipSync}
-          onTestLipSync={testLipSync}
-          onTestRandomMotion={testRandomMotion}
-        />
       </Stack>
 
       <Dialog open={showClickAreaDialog} onClose={cancelClickAreaAssociation} maxWidth="sm" fullWidth>
         <DialogTitle>
-          设置点击区域关联
+          {t('controls.clickAreaDialogTitle')}
           {currentAssociationItem ? ` - ${currentAssociationItem.name}` : ''}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
-            <Typography variant="body2">选择点击区域（可多选）</Typography>
+            <Typography variant="body2">{t('controls.clickAreaSelect')}</Typography>
 
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
               {availableClickAreas.map((area) => {
@@ -1881,7 +1855,7 @@ export default function Live2DControls({
             {selectedClickAreas.length > 0 && (
               <Box>
                 <Typography variant="body2" sx={{ mb: 1 }}>
-                  已选择区域
+                  {t('controls.clickAreaSelected')}
                 </Typography>
                 <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                   {selectedClickAreas.map((areaId) => (
@@ -1900,11 +1874,14 @@ export default function Live2DControls({
               <Alert severity="warning" variant="outlined">
                 <Stack spacing={0.5}>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    区域冲突提醒
+                    {t('controls.clickAreaConflict')}
                   </Typography>
                   {selectedAreaConflicts.map((conflict) => (
                     <Typography key={conflict.areaId} variant="caption">
-                      {conflict.areaName} 已被关联: {conflict.items.map((item) => item.name).join('、')}
+                      {t('controls.clickAreaConflictItem', {
+                        areaName: conflict.areaName,
+                        items: conflict.items.map((item) => item.name).join('、'),
+                      })}
                     </Typography>
                   ))}
                 </Stack>
@@ -1913,11 +1890,11 @@ export default function Live2DControls({
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={cancelClickAreaAssociation}>取消</Button>
+          <Button onClick={cancelClickAreaAssociation}>{t('common.cancel')}</Button>
           <Button onClick={confirmClickAreaAssociation} variant="contained">
             {selectedClickAreas.length === 0
-              ? '取消关联'
-              : `确定关联 (${selectedClickAreas.length} 个区域)`}
+              ? t('controls.clearAssociation')
+              : t('controls.confirmAssociation', { count: selectedClickAreas.length })}
           </Button>
         </DialogActions>
       </Dialog>

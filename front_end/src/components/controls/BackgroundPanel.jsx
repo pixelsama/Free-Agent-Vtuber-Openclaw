@@ -14,6 +14,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import WallpaperIcon from '@mui/icons-material/Wallpaper';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import { useI18n } from '../../i18n/I18nContext.jsx';
 
 function formatFileSize(bytes) {
   if (!bytes) return '0 B';
@@ -34,19 +35,20 @@ export default function BackgroundPanel({
   onRemoveCachedBackground,
   onClearAllCache,
 }) {
+  const { t } = useI18n();
   return (
     <Accordion>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center">
           <WallpaperIcon fontSize="small" />
-          <Typography sx={{ fontWeight: 600 }}>背景控制</Typography>
+          <Typography sx={{ fontWeight: 600 }}>{t('background.title')}</Typography>
         </Stack>
       </AccordionSummary>
       <AccordionDetails>
         <Stack spacing={2}>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
             <Button component="label" variant="outlined" startIcon={<UploadFileIcon />}>
-              上传背景
+              {t('background.upload')}
               <input
                 hidden
                 type="file"
@@ -55,13 +57,13 @@ export default function BackgroundPanel({
               />
             </Button>
             <Button variant="outlined" color="error" disabled={!hasBackground} onClick={onClearBackground}>
-              清除当前背景
+              {t('background.clearCurrent')}
             </Button>
           </Stack>
 
           <Box>
             <Typography variant="body2" sx={{ mb: 1 }}>
-              背景透明度: {(backgroundOpacity * 100).toFixed(0)}%
+              {t('background.opacity', { opacity: (backgroundOpacity * 100).toFixed(0) })}
             </Typography>
             <Slider
               value={backgroundOpacity}
@@ -72,11 +74,13 @@ export default function BackgroundPanel({
             />
           </Box>
 
-          <Typography variant="body2">缓存背景 ({cachedBackgrounds.length})</Typography>
+          <Typography variant="body2">
+            {t('background.cached', { count: cachedBackgrounds.length })}
+          </Typography>
           {cachedBackgrounds.length > 0 && (
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
               <Button variant="outlined" color="error" onClick={onClearAllCache}>
-                清空缓存
+                {t('background.clearCache')}
               </Button>
             </Stack>
           )}
@@ -101,10 +105,10 @@ export default function BackgroundPanel({
                 </Box>
                 <CardActions>
                   <Button size="small" onClick={() => onSelectCachedBackground(item)}>
-                    应用
+                    {t('background.apply')}
                   </Button>
                   <Button size="small" color="error" onClick={() => onRemoveCachedBackground(item.id)}>
-                    删除
+                    {t('background.delete')}
                   </Button>
                 </CardActions>
               </Card>

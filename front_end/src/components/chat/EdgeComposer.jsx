@@ -4,6 +4,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
+import { useI18n } from '../../i18n/I18nContext.jsx';
 import './EdgeComposer.css';
 
 function isEditableTarget(target) {
@@ -23,9 +24,9 @@ function isEditableTarget(target) {
   return false;
 }
 
-function normalizeErrorMessage(error) {
+function normalizeErrorMessage(error, t) {
   if (!error) {
-    return '发送失败，请稍后重试。';
+    return t('common.sendFailed');
   }
 
   if (typeof error === 'string') {
@@ -40,7 +41,7 @@ function normalizeErrorMessage(error) {
     return error.payload.message;
   }
 
-  return '发送失败，请稍后重试。';
+  return t('common.sendFailed');
 }
 
 export default function EdgeComposer({
@@ -51,8 +52,9 @@ export default function EdgeComposer({
   externalError = '',
   onDismissExternalError,
   onExpandedChange,
-  placeholder = '输入你想让她说的话...',
+  placeholder,
 }) {
+  const { t } = useI18n();
   const rootRef = useRef(null);
   const inputRef = useRef(null);
   const autoHideTimerRef = useRef(null);
@@ -99,7 +101,7 @@ export default function EdgeComposer({
   const submit = useCallback(async () => {
     const content = value.trim();
     if (!content) {
-      setLocalError('请输入要发送的内容。');
+      setLocalError(t('composer.emptyInput'));
       return;
     }
 
@@ -114,9 +116,9 @@ export default function EdgeComposer({
         setExpanded(false);
       }, 1500);
     } catch (error) {
-      setLocalError(normalizeErrorMessage(error));
+      setLocalError(normalizeErrorMessage(error, t));
     }
-  }, [clearAutoHideTimer, onDismissExternalError, onSubmit, value]);
+  }, [clearAutoHideTimer, onDismissExternalError, onSubmit, t, value]);
 
   useEffect(() => {
     if (!expanded) {
@@ -200,7 +202,7 @@ export default function EdgeComposer({
             openComposer();
           }
         }}
-        title="发送文字消息"
+        title={t('composer.sendTextTitle')}
       >
         <EditIcon />
       </IconButton>
@@ -222,7 +224,7 @@ export default function EdgeComposer({
             multiline
             minRows={variant === 'pet' ? 2 : 3}
             maxRows={6}
-            placeholder={placeholder}
+            placeholder={placeholder || t('composer.placeholder')}
             disabled={isStreaming}
             inputProps={{ maxLength: 400 }}
             onKeyDown={(event) => {
@@ -253,7 +255,7 @@ export default function EdgeComposer({
               onClick={closeComposer}
               disabled={isStreaming}
             >
-              收起
+              {t('composer.collapse')}
             </Button>
             <Button
               size="small"
@@ -264,7 +266,7 @@ export default function EdgeComposer({
               }}
               disabled={isStreaming}
             >
-              发送
+              {t('composer.send')}
             </Button>
             <Button
               size="small"
@@ -273,7 +275,7 @@ export default function EdgeComposer({
               onClick={onStop}
               disabled={!isStreaming}
             >
-              停止
+              {t('composer.stop')}
             </Button>
           </Box>
         </Box>

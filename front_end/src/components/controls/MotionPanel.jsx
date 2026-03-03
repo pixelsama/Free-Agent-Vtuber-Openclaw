@@ -13,6 +13,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import MovieIcon from '@mui/icons-material/Movie';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import { useI18n } from '../../i18n/I18nContext.jsx';
 
 export default function MotionPanel({
   modelLoaded,
@@ -32,35 +33,36 @@ export default function MotionPanel({
   onPlayMotion,
   onOpenClickAreaAssociation,
 }) {
+  const { t } = useI18n();
   return (
     <Accordion>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center">
           <MovieIcon fontSize="small" />
-          <Typography sx={{ fontWeight: 600 }}>动作控制</Typography>
-          <Chip size="small" label={`${motions.length} 个`} />
+          <Typography sx={{ fontWeight: 600 }}>{t('motion.title')}</Typography>
+          <Chip size="small" label={t('common.countItems', { count: motions.length })} />
         </Stack>
       </AccordionSummary>
       <AccordionDetails>
         <Stack spacing={2}>
           <TextField
-            label="手动输入动作文件名（可选）"
+            label={t('motion.manualInput')}
             value={manualMotionFiles}
             onChange={(event) => onManualMotionFilesChange(event.target.value)}
             multiline
             minRows={3}
-            placeholder={'留空可自动解析 model3.json；或每行一个文件名，例如:\nidle_01\ntap_body_01'}
+            placeholder={t('motion.manualPlaceholder')}
             size="small"
             fullWidth
           />
           <Button variant="outlined" onClick={onParseManualMotionFiles} disabled={isParsingModelFiles}>
-            {isParsingModelFiles ? '解析中...' : '自动解析（model3.json）/手动解析'}
+            {isParsingModelFiles ? t('motion.parsing') : t('motion.parse')}
           </Button>
 
           {availableMotionFiles.length > 0 && (
             <Box>
               <Typography variant="body2" sx={{ mb: 1 }}>
-                可用动作文件
+                {t('motion.availableFiles')}
               </Typography>
               <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                 {availableMotionFiles.map((file) => (
@@ -72,14 +74,14 @@ export default function MotionPanel({
 
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
             <TextField
-              label="新动作名称"
+              label={t('motion.newName')}
               value={newMotionName}
               onChange={(event) => onNewMotionNameChange(event.target.value)}
               size="small"
               fullWidth
             />
             <Button variant="outlined" onClick={onAddMotion} disabled={!newMotionName.trim()}>
-              添加动作
+              {t('motion.add')}
             </Button>
           </Stack>
 
@@ -99,7 +101,7 @@ export default function MotionPanel({
                     onClick={() => onRemoveMotion(motion.id)}
                     disabled={motions.length <= 1}
                   >
-                    删除
+                    {t('common.delete')}
                   </Button>
                 </Stack>
 
@@ -120,7 +122,7 @@ export default function MotionPanel({
 
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="center">
                   <Button component="label" variant="outlined" size="small" startIcon={<UploadFileIcon />}>
-                    上传动作文件
+                    {t('motion.upload')}
                     <input
                       hidden
                       type="file"
@@ -135,14 +137,14 @@ export default function MotionPanel({
                       variant="outlined"
                       onClick={() => onClearMotionFile(motion.id)}
                     >
-                      清除文件
+                      {t('motion.clearFile')}
                     </Button>
                   )}
                 </Stack>
 
                 {motion.fileName && (
                   <Typography variant="caption" color="success.main">
-                    已关联: {motion.fileName}
+                    {t('motion.linked', { fileName: motion.fileName })}
                   </Typography>
                 )}
 
@@ -153,7 +155,7 @@ export default function MotionPanel({
                     disabled={!modelLoaded}
                     onClick={() => onPlayMotion(motion.group, motion.index, motion.id)}
                   >
-                    播放
+                    {t('motion.play')}
                   </Button>
                   <Button
                     size="small"
@@ -161,7 +163,7 @@ export default function MotionPanel({
                     color="primary"
                     onClick={() => onOpenClickAreaAssociation(motion.id, 'motion')}
                   >
-                    点击区域
+                    {t('motion.clickArea')}
                     {Array.isArray(motion.clickAreas) && motion.clickAreas.length > 0
                       ? ` (${motion.clickAreas.length})`
                       : ''}

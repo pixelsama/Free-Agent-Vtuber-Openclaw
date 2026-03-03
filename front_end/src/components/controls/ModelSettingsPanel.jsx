@@ -17,6 +17,7 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
+import { useI18n } from '../../i18n/I18nContext.jsx';
 
 export default function ModelSettingsPanel({
   modelLoaded,
@@ -37,9 +38,12 @@ export default function ModelSettingsPanel({
   onCommitModelScale,
   onResetModel,
 }) {
+  const { t } = useI18n();
   const hasModels = availableModels.length > 0;
   const selectValue = hasModels ? selectedModel || availableModels[0].path : '';
-  const statusLabel = selectedModel ? (modelLoaded ? '模型已加载' : '加载中') : '未加载模型';
+  const statusLabel = selectedModel
+    ? (modelLoaded ? t('model.status.loaded') : t('model.status.loading'))
+    : t('model.status.unloaded');
   const statusColor = selectedModel ? (modelLoaded ? 'success' : 'warning') : 'default';
 
   return (
@@ -47,7 +51,7 @@ export default function ModelSettingsPanel({
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%' }}>
           <SettingsSuggestIcon fontSize="small" />
-          <Typography sx={{ fontWeight: 600 }}>模型设置</Typography>
+          <Typography sx={{ fontWeight: 600 }}>{t('modelSettings.title')}</Typography>
           <Chip
             size="small"
             color={statusColor}
@@ -62,21 +66,21 @@ export default function ModelSettingsPanel({
             onClick={onImportModelZip}
             disabled={isImportingModel}
           >
-            {isImportingModel ? '导入中...' : '导入模型 ZIP'}
+            {isImportingModel ? t('modelSettings.importing') : t('modelSettings.importZip')}
           </Button>
 
           <FormControl fullWidth size="small">
-            <InputLabel id="model-select-label">模型</InputLabel>
+            <InputLabel id="model-select-label">{t('modelSettings.modelLabel')}</InputLabel>
             <Select
               labelId="model-select-label"
               value={selectValue}
-              label="模型"
+              label={t('modelSettings.modelLabel')}
               disabled={!hasModels}
               onChange={(event) => onChangeModel(event.target.value)}
             >
               {!hasModels && (
                 <MenuItem value="" disabled>
-                  暂无可用模型，请先导入 ZIP
+                  {t('modelSettings.noModels')}
                 </MenuItem>
               )}
               {availableModels.map((model) => (
@@ -89,7 +93,7 @@ export default function ModelSettingsPanel({
 
           {!hasModels && (
             <Typography variant="caption" color="text.secondary">
-              支持包含 `.model3.json` 的 Live2D 模型压缩包。
+              {t('modelSettings.zipHint')}
             </Typography>
           )}
 
@@ -101,7 +105,7 @@ export default function ModelSettingsPanel({
 
           <Box>
             <Typography variant="body2" sx={{ mb: 1 }}>
-              模型缩放: {modelScale.toFixed(2)}
+              {t('modelSettings.scale', { scale: modelScale.toFixed(2) })}
             </Typography>
             <Slider
               value={modelScale}
@@ -120,7 +124,7 @@ export default function ModelSettingsPanel({
                 onChange={(event) => onToggleAutoEyeBlink(event.target.checked)}
               />
             }
-            label="自动眨眼"
+            label={t('modelSettings.autoEyeBlink')}
           />
           <FormControlLabel
             control={
@@ -129,7 +133,7 @@ export default function ModelSettingsPanel({
                 onChange={(event) => onToggleAutoBreath(event.target.checked)}
               />
             }
-            label="自动呼吸"
+            label={t('modelSettings.autoBreath')}
           />
           <FormControlLabel
             control={
@@ -138,11 +142,11 @@ export default function ModelSettingsPanel({
                 onChange={(event) => onToggleEyeTracking(event.target.checked)}
               />
             }
-            label="眼神跟随"
+            label={t('modelSettings.eyeTracking')}
           />
 
           <Button variant="outlined" onClick={onResetModel}>
-            重置模型
+            {t('modelSettings.reset')}
           </Button>
         </Stack>
       </AccordionDetails>

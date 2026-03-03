@@ -5,6 +5,7 @@ import Live2DViewer from '../components/live2d/Live2DViewer.jsx';
 import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import WindowTitleBar from '../components/window/WindowTitleBar.jsx';
 import EdgeComposer from '../components/chat/EdgeComposer.jsx';
+import { useI18n } from '../i18n/I18nContext.jsx';
 
 export default function MainShell({
   desktopMode,
@@ -21,6 +22,7 @@ export default function MainShell({
   onWindowControl,
   textComposerProps,
 }) {
+  const { t } = useI18n();
   const stageClassName = ['live2d-stage', 'window-mode', desktopMode ? `platform-${platform}` : '']
     .filter(Boolean)
     .join(' ');
@@ -56,7 +58,12 @@ export default function MainShell({
         />
       </Box>
 
-      <IconButton className="config-toggle" color="primary" onClick={onOpenConfigPanel}>
+      <IconButton
+        className="config-toggle"
+        color="primary"
+        onClick={onOpenConfigPanel}
+        title={t('main.openSettings')}
+      >
         <TuneIcon />
       </IconButton>
 
@@ -68,7 +75,7 @@ export default function MainShell({
             onClick={() => {
               void onSwitchToPetMode?.();
             }}
-            title="切换到桌宠模式"
+            title={t('main.switchToPetMode')}
           >
             <SwapHorizIcon />
           </IconButton>

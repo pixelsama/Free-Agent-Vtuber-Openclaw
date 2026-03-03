@@ -10,6 +10,7 @@ import {
 import CircularProgress from '@mui/material/CircularProgress';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import Live2DManager from '@/live2d/utils/Live2DManager.js';
+import { useI18n } from '../../i18n/I18nContext.jsx';
 import './Live2DViewer.css';
 
 function getPointerPosition(event, rect) {
@@ -41,6 +42,7 @@ const Live2DViewer = forwardRef(function Live2DViewer(
   },
   ref,
 ) {
+  const { t } = useI18n();
   const live2dContainerRef = useRef(null);
   const live2dCanvasRef = useRef(null);
   const managerRef = useRef(null);
@@ -688,7 +690,7 @@ const Live2DViewer = forwardRef(function Live2DViewer(
       {loading && (
         <div className="loading-overlay">
           <CircularProgress color="primary" size={50} />
-          <p>加载Live2D模型中...</p>
+          <p>{t('live2d.loadingModel')}</p>
         </div>
       )}
 
@@ -701,7 +703,7 @@ const Live2DViewer = forwardRef(function Live2DViewer(
 
       {!modelPath && !loading && !error && (
         <div className="empty-overlay">
-          <p>请先在控制面板导入并选择模型 ZIP</p>
+          <p>{t('live2d.noModelSelected')}</p>
         </div>
       )}
     </div>

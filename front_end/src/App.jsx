@@ -22,6 +22,12 @@ import { ModeProvider, MODE_PET, MODE_WINDOW, useModeContext } from './mode/Mode
 import MainShell from './shells/MainShell.jsx';
 import PetShell from './shells/PetShell.jsx';
 import { desktopBridge } from './services/desktopBridge.js';
+import {
+  I18nProvider,
+  LANGUAGE_EN_US,
+  LANGUAGE_ZH_CN,
+  useI18n,
+} from './i18n/I18nContext.jsx';
 
 const DEFAULT_MODEL = '';
 const CONFIG_DRAWER_WIDTH = 420;
@@ -35,16 +41,34 @@ const defaultOpenClawSettings = {
   hasSecureStorage: true,
 };
 
-function normalizeErrorMessage(error) {
+function normalizeErrorMessage(error, t) {
+  const fallbackMessage = t('common.requestFailed');
+
   if (!error) {
-    return '请求失败，请稍后重试。';
+    return fallbackMessage;
   }
 
   if (typeof error === 'string') {
+    const streamStatusMatch = /^流式接口请求失败:\s*(\d+)/.exec(error);
+    if (streamStatusMatch?.[1]) {
+      return t('error.streamRequestFailed', { status: streamStatusMatch[1] });
+    }
     return error;
   }
 
+  const code = error?.code || error?.payload?.code;
+  if (code === 'openclaw_missing_config') {
+    return t('error.openclawMissingConfig');
+  }
+  if (code === 'openclaw_unreachable') {
+    return t('error.openclawUnreachable');
+  }
+
   if (typeof error?.message === 'string' && error.message) {
+    const streamStatusMatch = /^流式接口请求失败:\s*(\d+)/.exec(error.message);
+    if (streamStatusMatch?.[1]) {
+      return t('error.streamRequestFailed', { status: streamStatusMatch[1] });
+    }
     return error.message;
   }
 
@@ -52,7 +76,7 @@ function normalizeErrorMessage(error) {
     return error.payload.message;
   }
 
-  return '请求失败，请稍后重试。';
+  return fallbackMessage;
 }
 
 function AppContent({ desktopMode }) {
@@ -62,6 +86,7 @@ function AppContent({ desktopMode }) {
   const closePanelSyncTimeoutRef = useRef(null);
   const { isPetMode, setMode } = useModeContext();
   const isNarrowViewport = useMediaQuery('(max-width:900px)');
+  const { language, setLanguage, t } = useI18n();
 
   const [modelLoaded, setModelLoaded] = useState(false);
   const [currentModelPath, setCurrentModelPath] = useState(DEFAULT_MODEL);
@@ -130,7 +155,7 @@ function AppContent({ desktopMode }) {
     const detachError = onError((error) => {
       console.error('字幕流式输出发生错误:', error);
       clearSubtitle();
-      setComposerExternalError(normalizeErrorMessage(error));
+      setComposerExternalError(normalizeErrorMessage(error, t));
     });
 
     return () => {
@@ -138,7 +163,7 @@ function AppContent({ desktopMode }) {
       detachDone?.();
       detachError?.();
     };
-  }, [appendDelta, clearSubtitle, onDelta, onDone, onError, replaceText]);
+  }, [appendDelta, clearSubtitle, onDelta, onDone, onError, replaceText, t]);
 
   useEffect(() => {
     return () => {
@@ -315,14 +340,14 @@ function AppContent({ desktopMode }) {
         ...defaultOpenClawSettings,
         ...saved,
       });
-      setSettingsFeedback('OpenClaw 配置已保存。');
+      setSettingsFeedback(t('app.settingsSaved'));
     } catch (error) {
       console.error('Save OpenClaw settings failed:', error);
-      setSettingsError(normalizeErrorMessage(error));
+      setSettingsError(normalizeErrorMessage(error, t));
     } finally {
       setSettingsSaving(false);
     }
-  }, [openClawSettings.agentId, openClawSettings.baseUrl, openClawSettings.token]);
+  }, [openClawSettings.agentId, openClawSettings.baseUrl, openClawSettings.token, t]);
 
   const testOpenClawSettings = useCallback(async () => {
     setSettingsTesting(true);
@@ -341,18 +366,21 @@ function AppContent({ desktopMode }) {
 
       const result = await desktopBridge.settings.testConnection(payload);
       if (!result?.ok) {
-        setSettingsError(normalizeErrorMessage(result?.error));
+        setSettingsError(normalizeErrorMessage(result?.error, t));
       } else {
-        const latency = typeof result.latencyMs === 'number' ? `（${result.latencyMs}ms）` : '';
-        setSettingsFeedback(`OpenClaw 连接成功${latency}`);
+        const latency =
+          typeof result.latencyMs === 'number'
+            ? t('app.latency', { latency: result.latencyMs })
+            : '';
+        setSettingsFeedback(t('app.settingsConnected', { latency }));
       }
     } catch (error) {
       console.error('Test OpenClaw settings failed:', error);
-      setSettingsError(normalizeErrorMessage(error));
+      setSettingsError(normalizeErrorMessage(error, t));
     } finally {
       setSettingsTesting(false);
     }
-  }, [openClawSettings.agentId, openClawSettings.baseUrl, openClawSettings.token]);
+  }, [openClawSettings.agentId, openClawSettings.baseUrl, openClawSettings.token, t]);
 
   const clearSavedToken = useCallback(async () => {
     setSettingsSaving(true);
@@ -366,14 +394,14 @@ function AppContent({ desktopMode }) {
         ...saved,
         token: '',
       }));
-      setSettingsFeedback('已清除保存的 Token。');
+      setSettingsFeedback(t('app.tokenCleared'));
     } catch (error) {
       console.error('Clear token failed:', error);
-      setSettingsError(normalizeErrorMessage(error));
+      setSettingsError(normalizeErrorMessage(error, t));
     } finally {
       setSettingsSaving(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!isPetMode) {
@@ -542,16 +570,32 @@ function AppContent({ desktopMode }) {
               <IconButton onClick={handleCloseConfigPanel}>
                 <CloseIcon />
               </IconButton>
-              <span>设置面板</span>
-              {modelLoaded && <Chip color="success" size="small" label="模型已加载" />}
+              <span>{t('app.settingsPanel')}</span>
+              {modelLoaded && <Chip color="success" size="small" label={t('app.modelLoaded')} />}
+              <Stack direction="row" spacing={0.75} sx={{ ml: 'auto' }}>
+                <Button
+                  size="small"
+                  variant={language === LANGUAGE_ZH_CN ? 'contained' : 'outlined'}
+                  onClick={() => setLanguage(LANGUAGE_ZH_CN)}
+                >
+                  {t('language.zh')}
+                </Button>
+                <Button
+                  size="small"
+                  variant={language === LANGUAGE_EN_US ? 'contained' : 'outlined'}
+                  onClick={() => setLanguage(LANGUAGE_EN_US)}
+                >
+                  {t('language.en')}
+                </Button>
+              </Stack>
             </Stack>
           </Box>
 
           <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 2 }}>
             <Stack spacing={2}>
               <Tabs value={activeConfigTab} onChange={(_, tab) => setActiveConfigTab(tab)} variant="fullWidth">
-                <Tab label="Live2D 控制面板" />
-                <Tab label="OpenClaw 设置" />
+                <Tab label={t('app.tab.live2d')} />
+                <Tab label={t('app.tab.openclaw')} />
               </Tabs>
               <Divider />
 
@@ -591,12 +635,12 @@ function AppContent({ desktopMode }) {
                 <Stack spacing={2}>
                   {!desktopMode && (
                     <Alert severity="warning">
-                      当前为 Web 模式，Token 会存入浏览器本地存储，仅建议用于开发测试。
+                      {t('app.webModeWarning')}
                     </Alert>
                   )}
 
                   {desktopMode && !openClawSettings.hasSecureStorage && (
-                    <Alert severity="warning">系统密钥链不可用，Token 将回退为本地明文存储。</Alert>
+                    <Alert severity="warning">{t('app.keychainWarning')}</Alert>
                   )}
 
                   <TextField
@@ -613,7 +657,7 @@ function AppContent({ desktopMode }) {
                     onChange={(event) => handleOpenClawSettingChange('token', event.target.value)}
                     type="password"
                     autoComplete="off"
-                    placeholder={openClawSettings.hasToken ? '已保存（留空表示不修改）' : ''}
+                    placeholder={openClawSettings.hasToken ? t('app.tokenSavedPlaceholder') : ''}
                     fullWidth
                   />
 
@@ -627,10 +671,10 @@ function AppContent({ desktopMode }) {
 
                   <Stack direction="row" spacing={1}>
                     <Button variant="contained" onClick={saveOpenClawSettings} disabled={settingsSaving || settingsTesting}>
-                      {settingsSaving ? '保存中...' : '保存设置'}
+                      {settingsSaving ? t('app.savingSettings') : t('app.saveSettings')}
                     </Button>
                     <Button variant="outlined" onClick={testOpenClawSettings} disabled={settingsSaving || settingsTesting}>
-                      {settingsTesting ? '测试中...' : '连接测试'}
+                      {settingsTesting ? t('app.testingConnection') : t('app.connectionTest')}
                     </Button>
                     <Button
                       variant="text"
@@ -638,7 +682,7 @@ function AppContent({ desktopMode }) {
                       onClick={clearSavedToken}
                       disabled={settingsSaving || settingsTesting || !openClawSettings.hasToken}
                     >
-                      清除 Token
+                      {t('app.clearToken')}
                     </Button>
                   </Stack>
 
@@ -658,8 +702,10 @@ export default function App() {
   const desktopMode = desktopBridge.isDesktop();
 
   return (
-    <ModeProvider desktopMode={desktopMode}>
-      <AppContent desktopMode={desktopMode} />
-    </ModeProvider>
+    <I18nProvider>
+      <ModeProvider desktopMode={desktopMode}>
+        <AppContent desktopMode={desktopMode} />
+      </ModeProvider>
+    </I18nProvider>
   );
 }
