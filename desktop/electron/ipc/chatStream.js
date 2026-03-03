@@ -73,12 +73,15 @@ function registerChatStreamIpc({ ipcMain, emitEvent, getSettings, startStream = 
     }
   };
 
-  ipcMain.handle('chat:stream:start', async (_event, request = {}) => {
+  const startChatStream = (request = {}) => {
     const content = typeof request.content === 'string' ? request.content.trim() : '';
     const sessionId = typeof request.sessionId === 'string' ? request.sessionId : 'default';
 
     if (!content) {
-      throw new Error('content is required');
+      return {
+        ok: false,
+        reason: 'content_required',
+      };
     }
 
     const streamId = randomUUID();
@@ -99,7 +102,19 @@ function registerChatStreamIpc({ ipcMain, emitEvent, getSettings, startStream = 
       state,
     );
 
-    return { streamId };
+    return {
+      ok: true,
+      streamId,
+    };
+  };
+
+  ipcMain.handle('chat:stream:start', async (_event, request = {}) => {
+    const result = startChatStream(request);
+    if (!result.ok) {
+      throw new Error('content is required');
+    }
+
+    return { streamId: result.streamId };
   });
 
   ipcMain.handle('chat:stream:abort', async (_event, request = {}) => {
@@ -118,13 +133,17 @@ function registerChatStreamIpc({ ipcMain, emitEvent, getSettings, startStream = 
     return { ok: true };
   });
 
-  return () => {
+  const dispose = () => {
     for (const [, state] of streamMap.entries()) {
       state.aborted = true;
       state.controller.abort();
     }
     streamMap.clear();
   };
+
+  dispose.start = async (request = {}) => startChatStream(request);
+
+  return dispose;
 }
 
 module.exports = {

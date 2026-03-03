@@ -29,6 +29,7 @@ let disposeChatStreamHandlers = null;
 let disposeModeHandlers = null;
 let disposeLive2DModelsHandlers = null;
 let disposeVoiceSessionHandlers = null;
+let startChatStreamFromMain = null;
 let settingsStore = null;
 let windowModeManager = null;
 let trayManager = null;
@@ -245,7 +246,7 @@ async function bootstrap() {
     modelLibrary: live2dModelLibrary,
   });
 
-  disposeChatStreamHandlers = registerChatStreamIpc({
+  const chatStreamControl = registerChatStreamIpc({
     ipcMain,
     getSettings: () => settingsStore.getForMain(),
     emitEvent: (payload) => {
@@ -256,6 +257,9 @@ async function bootstrap() {
       mainWindow.webContents.send('chat:stream:event', payload);
     },
   });
+  disposeChatStreamHandlers = chatStreamControl;
+  startChatStreamFromMain =
+    typeof chatStreamControl?.start === 'function' ? chatStreamControl.start : null;
 
   disposeVoiceSessionHandlers = registerVoiceSessionIpc({
     ipcMain,
@@ -272,6 +276,27 @@ async function bootstrap() {
       }
 
       mainWindow.webContents.send('voice:flow-control', payload);
+    },
+    onAsrFinal: async ({ sessionId, text }) => {
+      const content = typeof text === 'string' ? text.trim() : '';
+      if (!content || typeof startChatStreamFromMain !== 'function') {
+        return;
+      }
+
+      try {
+        const started = await startChatStreamFromMain({
+          sessionId,
+          content,
+          options: {
+            source: 'voice-asr',
+          },
+        });
+        if (!started?.ok) {
+          console.warn('Auto chat stream from ASR final skipped:', started?.reason || 'unknown_reason');
+        }
+      } catch (error) {
+        console.error('Failed to auto-start chat stream from ASR final:', error);
+      }
     },
   });
 
@@ -307,6 +332,7 @@ app.on('before-quit', () => {
   if (disposeChatStreamHandlers) {
     disposeChatStreamHandlers();
   }
+  startChatStreamFromMain = null;
 
   if (disposeModeHandlers) {
     disposeModeHandlers();

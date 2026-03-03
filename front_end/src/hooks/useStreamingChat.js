@@ -84,13 +84,17 @@ const consumeBufferedDesktopEvents = (streamId) => {
 };
 
 const resolveDesktopPending = (streamId, pending, endedBy, payload = null) => {
+  const isActiveStream = activeDesktopStreamId === streamId;
   if (endedBy === 'done') {
     pending.emitDone(payload);
   }
   pending.resolve({ endedBy });
   desktopPendingMap.delete(streamId);
-  if (activeDesktopStreamId === streamId) {
+  if (isActiveStream) {
     activeDesktopStreamId = null;
+  }
+  if (pending.adopted && isActiveStream) {
+    setStreamingState(false);
   }
 };
 
@@ -112,6 +116,33 @@ const handleDesktopEvent = (streamId, type, payload, pending) => {
     resolveDesktopPending(streamId, pending, 'done', payload || null);
   }
 };
+
+const shouldAdoptDesktopEvent = (streamId, type) => {
+  if (!streamId || desktopPendingMap.has(streamId)) {
+    return false;
+  }
+
+  if (type !== 'text-delta' && type !== 'done' && type !== 'error') {
+    return false;
+  }
+
+  if (activeDesktopStreamId && activeDesktopStreamId !== streamId) {
+    return false;
+  }
+
+  return true;
+};
+
+const createAdoptedDesktopPending = (streamId) => ({
+  adopted: true,
+  emitDone: (payload) => {
+    notifyHandlers(doneHandlers, payload);
+  },
+  resolve: () => {
+    // no-op: adopted stream lifecycle is handled in resolveDesktopPending
+  },
+  streamId,
+});
 
 const processSseEvent = (eventType, data, emitDone) => {
   if (!data && eventType !== 'done') {
@@ -159,6 +190,15 @@ const ensureDesktopEventListener = () => {
 
     const pending = desktopPendingMap.get(streamId);
     if (!pending) {
+      if (shouldAdoptDesktopEvent(streamId, type)) {
+        const adoptedPending = createAdoptedDesktopPending(streamId);
+        desktopPendingMap.set(streamId, adoptedPending);
+        activeDesktopStreamId = streamId;
+        setStreamingState(true);
+        handleDesktopEvent(streamId, type, payload, adoptedPending);
+        return;
+      }
+
       bufferDesktopEvent(streamId, { type, payload });
       return;
     }
