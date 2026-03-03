@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { Box, IconButton } from '@mui/material';
-import EditIcon from '@mui/icons-material/Edit';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import Live2DViewer from '../components/live2d/Live2DViewer.jsx';
 import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import { usePetDraggable } from '../hooks/pet/usePetDraggable.js';
+import EdgeComposer from '../components/chat/EdgeComposer.jsx';
 
 export default function PetShell({
   desktopMode,
@@ -17,9 +17,9 @@ export default function PetShell({
   onModelError,
   subtitleText,
   onSwitchToWindowMode,
-  onOpenTextInputDialog,
   bindPetHover,
   setPetHover,
+  textComposerProps,
 }) {
   const modelHoverRef = useRef(false);
 
@@ -125,9 +125,7 @@ export default function PetShell({
           >
             <SwapHorizIcon />
           </IconButton>
-          <IconButton className="text-toggle" color="primary" onClick={onOpenTextInputDialog}>
-            <EditIcon />
-          </IconButton>
+          <EdgeComposer variant="pet" {...textComposerProps} />
         </Box>
       </Box>
 

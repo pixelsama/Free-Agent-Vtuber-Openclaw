@@ -5,7 +5,6 @@ import {
   Button,
   Chip,
   Dialog,
-  DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
@@ -68,9 +67,7 @@ function AppContent({ desktopMode }) {
   );
 
   const [showConfigPanel, setShowConfigPanel] = useState(false);
-  const [showTextInputDialog, setShowTextInputDialog] = useState(false);
-  const [textInputContent, setTextInputContent] = useState('');
-  const [textInputError, setTextInputError] = useState('');
+  const [composerExternalError, setComposerExternalError] = useState('');
 
   const [openClawSettings, setOpenClawSettings] = useState(defaultOpenClawSettings);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -127,7 +124,7 @@ function AppContent({ desktopMode }) {
     const detachError = onError((error) => {
       console.error('字幕流式输出发生错误:', error);
       clearSubtitle();
-      setTextInputError(normalizeErrorMessage(error));
+      setComposerExternalError(normalizeErrorMessage(error));
     });
 
     return () => {
@@ -229,37 +226,17 @@ function AppContent({ desktopMode }) {
     [desktopMode, isPetMode],
   );
 
-  const openTextInputDialog = useCallback(() => {
-    setTextInputContent('');
-    setTextInputError('');
-    setShowTextInputDialog(true);
+  const submitTextComposer = useCallback(
+    async (content) => {
+      setComposerExternalError('');
+      await sendUserText(content, { sessionId: 'text-composer' });
+    },
+    [sendUserText],
+  );
+
+  const dismissComposerExternalError = useCallback(() => {
+    setComposerExternalError('');
   }, []);
-
-  const closeTextInputDialog = useCallback(() => {
-    if (isStreaming) return;
-    setShowTextInputDialog(false);
-    setTextInputContent('');
-    setTextInputError('');
-  }, [isStreaming]);
-
-  const submitTextInput = useCallback(async () => {
-    const content = textInputContent.trim();
-    if (!content) {
-      setTextInputError('请输入要发送的内容。');
-      return;
-    }
-
-    setTextInputError('');
-
-    try {
-      await sendUserText(content, { sessionId: 'text-dialog' });
-      setShowTextInputDialog(false);
-      setTextInputContent('');
-    } catch (error) {
-      console.error('发送文字消息失败:', error);
-      setTextInputError(normalizeErrorMessage(error));
-    }
-  }, [sendUserText, textInputContent]);
 
   const stageStyle = useMemo(
     () => ({
@@ -372,12 +349,28 @@ function AppContent({ desktopMode }) {
     }
 
     setShowConfigPanel(false);
-    setShowTextInputDialog(false);
   }, [isPetMode]);
 
   useEffect(() => {
     setModelLoaded(false);
   }, [isPetMode]);
+
+  const textComposerProps = useMemo(
+    () => ({
+      isStreaming,
+      onSubmit: submitTextComposer,
+      onStop: stopStreaming,
+      externalError: composerExternalError,
+      onDismissExternalError: dismissComposerExternalError,
+    }),
+    [
+      composerExternalError,
+      dismissComposerExternalError,
+      isStreaming,
+      stopStreaming,
+      submitTextComposer,
+    ],
+  );
 
   return (
     <Box sx={stageStyle}>
@@ -393,9 +386,9 @@ function AppContent({ desktopMode }) {
           onModelError={handleModelError}
           subtitleText={subtitleText}
           onSwitchToWindowMode={() => setDesktopWindowMode(MODE_WINDOW)}
-          onOpenTextInputDialog={openTextInputDialog}
           bindPetHover={bindPetHover}
           setPetHover={setPetHover}
+          textComposerProps={textComposerProps}
         />
       ) : (
         <MainShell
@@ -409,9 +402,9 @@ function AppContent({ desktopMode }) {
           onModelError={handleModelError}
           subtitleText={subtitleText}
           onOpenConfigPanel={() => setShowConfigPanel(true)}
-          onOpenTextInputDialog={openTextInputDialog}
           onSwitchToPetMode={() => setDesktopWindowMode(MODE_PET)}
           onWindowControl={controlWindow}
+          textComposerProps={textComposerProps}
         />
       )}
 
@@ -525,44 +518,6 @@ function AppContent({ desktopMode }) {
             </Stack>
           </Stack>
         </DialogContent>
-      </Dialog>
-
-      <Dialog open={showTextInputDialog} onClose={closeTextInputDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>发送文字消息</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <TextField
-              value={textInputContent}
-              onChange={(event) => setTextInputContent(event.target.value)}
-              multiline
-              minRows={3}
-              maxRows={8}
-              placeholder="输入你想让她说的话..."
-              disabled={isStreaming}
-              inputProps={{ maxLength: 400 }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  void submitTextInput();
-                }
-              }}
-            />
-            {textInputError && (
-              <Box sx={{ color: 'error.main', fontSize: 14, lineHeight: 1.5 }}>{textInputError}</Box>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="text" onClick={closeTextInputDialog} disabled={isStreaming}>
-            取消
-          </Button>
-          <Button variant="contained" onClick={() => void submitTextInput()} disabled={isStreaming}>
-            {isStreaming ? '发送中' : '发送'}
-          </Button>
-          <Button variant="text" color="warning" onClick={stopStreaming} disabled={!isStreaming}>
-            停止流式
-          </Button>
-        </DialogActions>
       </Dialog>
     </Box>
   );

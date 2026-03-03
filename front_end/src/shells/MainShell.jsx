@@ -1,10 +1,10 @@
 import { Box, IconButton } from '@mui/material';
 import TuneIcon from '@mui/icons-material/Tune';
-import EditIcon from '@mui/icons-material/Edit';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import Live2DViewer from '../components/live2d/Live2DViewer.jsx';
 import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import WindowTitleBar from '../components/window/WindowTitleBar.jsx';
+import EdgeComposer from '../components/chat/EdgeComposer.jsx';
 
 export default function MainShell({
   desktopMode,
@@ -17,9 +17,9 @@ export default function MainShell({
   onModelError,
   subtitleText,
   onOpenConfigPanel,
-  onOpenTextInputDialog,
   onSwitchToPetMode,
   onWindowControl,
+  textComposerProps,
 }) {
   const stageClassName = ['live2d-stage', 'window-mode', desktopMode ? `platform-${platform}` : '']
     .filter(Boolean)
@@ -73,9 +73,7 @@ export default function MainShell({
             <SwapHorizIcon />
           </IconButton>
         )}
-        <IconButton className="text-toggle" color="primary" onClick={onOpenTextInputDialog}>
-          <EditIcon />
-        </IconButton>
+        <EdgeComposer variant="main" {...textComposerProps} />
       </Box>
 
       <SubtitleBar text={subtitleText} />
