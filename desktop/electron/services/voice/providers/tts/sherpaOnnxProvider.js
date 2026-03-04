@@ -8,6 +8,7 @@ const DEFAULT_SPEED = 1;
 const DEFAULT_SID = 0;
 const DEFAULT_OUTPUT_SAMPLE_FORMAT = 'pcm_s16le';
 const DEFAULT_FALLBACK_SAMPLE_RATE = 24000;
+const DEFAULT_TEXT_SEGMENT_MAX_CHARS = 220;
 
 function createAbortError() {
   const error = new Error('aborted');
@@ -340,6 +341,113 @@ function splitSamples(samples, sampleRate, chunkMs) {
   return out;
 }
 
+function splitLongTextSegment(segmentText, maxChars) {
+  const normalizedText = typeof segmentText === 'string' ? segmentText.trim() : '';
+  if (!normalizedText) {
+    return [];
+  }
+
+  if (normalizedText.length <= maxChars) {
+    return [normalizedText];
+  }
+
+  const out = [];
+  for (let offset = 0; offset < normalizedText.length; offset += maxChars) {
+    const next = normalizedText.slice(offset, offset + maxChars).trim();
+    if (next) {
+      out.push(next);
+    }
+  }
+  return out;
+}
+
+function splitTextForTts(text, maxChars) {
+  const normalizedText = typeof text === 'string' ? text.trim() : '';
+  if (!normalizedText) {
+    return [];
+  }
+
+  const safeMaxChars = Math.max(40, toFiniteInteger(maxChars, DEFAULT_TEXT_SEGMENT_MAX_CHARS));
+  const sentenceLikeParts =
+    normalizedText.match(/[^。！？!?；;：:\n]+[。！？!?；;：:\n]*/g)
+    || [normalizedText];
+  const parts = sentenceLikeParts
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return splitLongTextSegment(normalizedText, safeMaxChars);
+  }
+
+  const out = [];
+  let current = '';
+  for (const part of parts) {
+    if (!current) {
+      if (part.length > safeMaxChars) {
+        out.push(...splitLongTextSegment(part, safeMaxChars));
+      } else {
+        current = part;
+      }
+      continue;
+    }
+
+    if (current.length + part.length <= safeMaxChars) {
+      current += part;
+      continue;
+    }
+
+    out.push(current);
+    if (part.length > safeMaxChars) {
+      out.push(...splitLongTextSegment(part, safeMaxChars));
+      current = '';
+    } else {
+      current = part;
+    }
+  }
+
+  if (current) {
+    out.push(current);
+  }
+
+  return out;
+}
+
+async function generateSamples({
+  tts,
+  request,
+  signal,
+}) {
+  let generated;
+  if (typeof tts.generateAsync === 'function') {
+    generated = await tts.generateAsync({
+      ...request,
+      onProgress: () => {
+        if (signal?.aborted) {
+          return 0;
+        }
+        return 1;
+      },
+    });
+  } else {
+    generated = tts.generate(request);
+  }
+
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+
+  const samples = normalizeSamples(generated?.samples);
+  const sampleRate = Math.max(
+    1,
+    toFiniteInteger(generated?.sampleRate, toFiniteInteger(tts.sampleRate, DEFAULT_FALLBACK_SAMPLE_RATE)),
+  );
+
+  return {
+    samples,
+    sampleRate,
+  };
+}
+
 function createSherpaOnnxTtsProvider({ options = {}, requireFn = require } = {}) {
   let sherpaModule = null;
   let ttsConfig = null;
@@ -429,66 +537,59 @@ function createSherpaOnnxTtsProvider({ options = {}, requireFn = require } = {})
       const generationConfig = options.generationConfig && typeof options.generationConfig === 'object'
         ? options.generationConfig
         : undefined;
-      const request = {
-        text: normalizedText,
-        sid: Math.max(0, toFiniteInteger(options.sid, DEFAULT_SID)),
-        speed: Math.max(0.1, toFiniteNumber(options.speed, DEFAULT_SPEED)),
-      };
-
-      if (generationConfig) {
-        request.generationConfig = generationConfig;
-      }
-
-      if (options.enableExternalBuffer !== undefined) {
-        request.enableExternalBuffer = toBooleanFlag(options.enableExternalBuffer, true);
-      }
-
-      let generated;
-      if (typeof tts.generateAsync === 'function') {
-        generated = await tts.generateAsync({
-          ...request,
-          onProgress: () => {
-            if (signal?.aborted) {
-              return 0;
-            }
-            return 1;
-          },
-        });
-      } else {
-        generated = tts.generate(request);
-      }
-
-      if (signal?.aborted) {
-        throw createAbortError();
-      }
-
-      const samples = normalizeSamples(generated?.samples);
-      const sampleRate = Math.max(
-        1,
-        toFiniteInteger(generated?.sampleRate, toFiniteInteger(tts.sampleRate, DEFAULT_FALLBACK_SAMPLE_RATE)),
-      );
       const chunkMs = Math.max(20, toFiniteInteger(options.chunkMs, DEFAULT_CHUNK_MS));
       const outputSampleFormat = normalizePath(options.outputSampleFormat) || DEFAULT_OUTPUT_SAMPLE_FORMAT;
+      const segmentMaxChars = Math.max(40, toFiniteInteger(
+        options.textSegmentMaxChars,
+        DEFAULT_TEXT_SEGMENT_MAX_CHARS,
+      ));
+      const textSegments = splitTextForTts(normalizedText, segmentMaxChars);
 
-      if (typeof onChunk === 'function' && samples.length > 0) {
-        const frames = splitSamples(samples, sampleRate, chunkMs);
-        for (const frame of frames) {
-          if (signal?.aborted) {
-            throw createAbortError();
+      let totalSampleCount = 0;
+      let resolvedSampleRate = toFiniteInteger(tts.sampleRate, DEFAULT_FALLBACK_SAMPLE_RATE);
+      for (const textSegment of textSegments) {
+        const request = {
+          text: textSegment,
+          sid: Math.max(0, toFiniteInteger(options.sid, DEFAULT_SID)),
+          speed: Math.max(0.1, toFiniteNumber(options.speed, DEFAULT_SPEED)),
+        };
+
+        if (generationConfig) {
+          request.generationConfig = generationConfig;
+        }
+
+        if (options.enableExternalBuffer !== undefined) {
+          request.enableExternalBuffer = toBooleanFlag(options.enableExternalBuffer, true);
+        }
+
+        const { samples, sampleRate } = await generateSamples({
+          tts,
+          request,
+          signal,
+        });
+        resolvedSampleRate = sampleRate;
+        totalSampleCount += samples.length;
+
+        if (typeof onChunk === 'function' && samples.length > 0) {
+          const frames = splitSamples(samples, sampleRate, chunkMs);
+          for (const frame of frames) {
+            if (signal?.aborted) {
+              throw createAbortError();
+            }
+
+            const { audioChunk, codec } = buildChunkBuffer(frame, outputSampleFormat);
+            await onChunk({
+              audioChunk,
+              codec,
+              sampleRate,
+            });
           }
-
-          const { audioChunk, codec } = buildChunkBuffer(frame, outputSampleFormat);
-          await onChunk({
-            audioChunk,
-            codec,
-            sampleRate,
-          });
         }
       }
 
       return {
-        sampleRate,
-        sampleCount: samples.length,
+        sampleRate: Math.max(1, toFiniteInteger(resolvedSampleRate, DEFAULT_FALLBACK_SAMPLE_RATE)),
+        sampleCount: totalSampleCount,
       };
     },
   };

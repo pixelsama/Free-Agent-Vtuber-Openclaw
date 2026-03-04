@@ -102,6 +102,7 @@ function buildSherpaOnnxTtsOptionsFromEnv(env = process.env) {
     speed: env.VOICE_TTS_SHERPA_SPEED,
     chunkMs: env.VOICE_TTS_SHERPA_CHUNK_MS,
     outputSampleFormat: env.VOICE_TTS_SHERPA_OUTPUT_SAMPLE_FORMAT,
+    textSegmentMaxChars: env.VOICE_TTS_SHERPA_TEXT_SEGMENT_MAX_CHARS,
     enableExternalBuffer: env.VOICE_TTS_SHERPA_ENABLE_EXTERNAL_BUFFER,
     lengthScale: env.VOICE_TTS_SHERPA_LENGTH_SCALE,
     noiseScale: env.VOICE_TTS_SHERPA_NOISE_SCALE,

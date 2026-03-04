@@ -25,6 +25,7 @@ test('buildSherpaOnnxTtsOptionsFromEnv maps env values', () => {
     VOICE_TTS_SHERPA_SPEED: '1.25',
     VOICE_TTS_SHERPA_CHUNK_MS: '80',
     VOICE_TTS_SHERPA_OUTPUT_SAMPLE_FORMAT: 'pcm_f32le',
+    VOICE_TTS_SHERPA_TEXT_SEGMENT_MAX_CHARS: '180',
     VOICE_TTS_SHERPA_ENABLE_EXTERNAL_BUFFER: '0',
   });
 
@@ -41,6 +42,7 @@ test('buildSherpaOnnxTtsOptionsFromEnv maps env values', () => {
   assert.equal(options.speed, '1.25');
   assert.equal(options.chunkMs, '80');
   assert.equal(options.outputSampleFormat, 'pcm_f32le');
+  assert.equal(options.textSegmentMaxChars, '180');
   assert.equal(options.enableExternalBuffer, '0');
 });
 
@@ -207,4 +209,36 @@ test('sherpa tts provider can be aborted during chunk emit', async () => {
       return true;
     },
   );
+});
+
+test('sherpa tts provider splits long text into bounded segments', async () => {
+  const textCalls = [];
+  const provider = createSherpaOnnxTtsProvider({
+    options: {
+      chunkMs: 20,
+      textSegmentMaxChars: 40,
+      ttsConfig: {},
+      createTtsFn: () => ({
+        generate(request) {
+          textCalls.push(request.text);
+          return {
+            sampleRate: 16000,
+            samples: new Float32Array(160).fill(0.1),
+          };
+        },
+      }),
+    },
+  });
+
+  const result = await provider.synthesize({
+    text:
+      '这是第一句这是第一句这是第一句这是第一句这是第一句。'
+      + '这是第二句这是第二句这是第二句这是第二句这是第二句。'
+      + '这是第三句这是第三句这是第三句这是第三句这是第三句。',
+    onChunk: () => {},
+  });
+
+  assert.ok(textCalls.length >= 2);
+  assert.ok(textCalls.every((part) => typeof part === 'string' && part.length <= 40));
+  assert.equal(result.sampleCount, textCalls.length * 160);
 });

@@ -32,6 +32,15 @@ function isTruthy(value, fallback = false) {
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
+function toPositiveInteger(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+
+  return parsed;
+}
+
 function createWorkerError(message, code = 'voice_tts_worker_error') {
   const error = new Error(message);
   error.code = code;
@@ -47,6 +56,15 @@ function toRequestId(value) {
 function cloneAudioChunk(value) {
   if (Buffer.isBuffer(value)) {
     return Uint8Array.from(value);
+  }
+
+  if (
+    value
+    && typeof value === 'object'
+    && value.type === 'Buffer'
+    && Array.isArray(value.data)
+  ) {
+    return Uint8Array.from(value.data);
   }
 
   if (value instanceof Uint8Array) {
@@ -71,6 +89,7 @@ function cloneAudioChunk(value) {
 function createTtsWorkerClient({ provider = null, env = process.env } = {}) {
   const configuredProvider = normalizeProviderName(provider) || normalizeProviderName(env?.VOICE_TTS_PROVIDER);
   const disableWorker = isTruthy(env?.VOICE_TTS_DISABLE_WORKER, false);
+  const workerMaxOldSpaceMb = toPositiveInteger(env?.VOICE_TTS_WORKER_MAX_OLD_SPACE_MB);
 
   // Keep mock provider in-process for lightweight tests and local fallback.
   if (disableWorker || !configuredProvider || configuredProvider === 'mock') {
@@ -104,9 +123,13 @@ function createTtsWorkerClient({ provider = null, env = process.env } = {}) {
       return worker;
     }
 
-    worker = fork(workerFilePath, [], {
+    const forkOptions = {
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-    });
+    };
+    if (workerMaxOldSpaceMb > 0) {
+      forkOptions.execArgv = [`--max-old-space-size=${workerMaxOldSpaceMb}`];
+    }
+    worker = fork(workerFilePath, [], forkOptions);
 
     worker.stderr?.on('data', (chunk) => {
       const text = chunk.toString();
@@ -244,15 +267,7 @@ function createTtsWorkerClient({ provider = null, env = process.env } = {}) {
     }
   };
 
-  const synthesize = async ({ text = '', signal, onChunk } = {}) => {
-    const normalizedText = typeof text === 'string' ? text.trim() : '';
-    if (!normalizedText) {
-      return {
-        sampleRate: 0,
-        sampleCount: 0,
-      };
-    }
-
+  const sendSynthesizeRequest = async ({ text, signal, onChunk } = {}) => {
     await ensureReady();
 
     if (!worker || worker.killed) {
@@ -295,9 +310,51 @@ function createTtsWorkerClient({ provider = null, env = process.env } = {}) {
       worker.send({
         type: 'synthesize',
         requestId,
-        text: normalizedText,
+        text,
       });
     });
+  };
+
+  const synthesize = async ({ text = '', signal, onChunk } = {}) => {
+    const normalizedText = typeof text === 'string' ? text.trim() : '';
+    if (!normalizedText) {
+      return {
+        sampleRate: 0,
+        sampleCount: 0,
+      };
+    }
+
+    let emittedChunkCount = 0;
+    let retriesLeft = 1;
+    const wrappedOnChunk = async (chunk) => {
+      emittedChunkCount += 1;
+      if (typeof onChunk === 'function') {
+        await onChunk(chunk);
+      }
+    };
+
+    while (true) {
+      try {
+        return await sendSynthesizeRequest({
+          text: normalizedText,
+          signal,
+          onChunk: wrappedOnChunk,
+        });
+      } catch (error) {
+        const shouldRetry =
+          retriesLeft > 0
+          && emittedChunkCount === 0
+          && error?.code === 'voice_tts_worker_exited'
+          && !disposed
+          && !signal?.aborted;
+
+        if (!shouldRetry) {
+          throw error;
+        }
+
+        retriesLeft -= 1;
+      }
+    }
   };
 
   const dispose = async () => {
