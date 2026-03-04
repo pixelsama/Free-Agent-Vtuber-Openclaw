@@ -82,6 +82,11 @@ function resolveDefaultMode(options = {}) {
     return forcedMode;
   }
 
+  const modelKind = normalizeModelKind(options.modelKind);
+  if (modelKind === 'zipformer2ctc') {
+    return 'online';
+  }
+
   if (toBooleanFlag(options.preferOnline, false)) {
     return 'online';
   }

@@ -71,6 +71,9 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   const speechQueueRef = useRef(Promise.resolve());
   const runEpochRef = useRef(0);
   const mountedRef = useRef(true);
+  const stopPlaybackRef = useRef(null);
+  const stopVadRef = useRef(null);
+  const stopSessionRef = useRef(null);
   const [capturedFrames, setCapturedFrames] = useState(0);
   const [isProcessingSpeech, setIsProcessingSpeech] = useState(false);
   const [modelBundles, setModelBundles] = useState([]);
@@ -127,6 +130,16 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
     () => modelBundles.find((item) => item.id === selectedBundleId) || null,
     [modelBundles, selectedBundleId],
   );
+  const selectedCatalogItem = useMemo(
+    () => catalogItems.find((item) => item.id === selectedCatalogId) || null,
+    [catalogItems, selectedCatalogId],
+  );
+  const isSelectedCatalogInstalled = useMemo(() => {
+    if (!selectedCatalogItem?.name) {
+      return false;
+    }
+    return modelBundles.some((bundle) => bundle.name === selectedCatalogItem.name);
+  }, [modelBundles, selectedCatalogItem]);
 
   const loadVoiceModels = useCallback(
     async ({ silent = false } = {}) => {
@@ -419,6 +432,12 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   }, [stopPlayback, stopTts]);
 
   useEffect(() => {
+    stopPlaybackRef.current = stopPlayback;
+    stopVadRef.current = stopVad;
+    stopSessionRef.current = stopSession;
+  }, [stopPlayback, stopSession, stopVad]);
+
+  useEffect(() => {
     void loadVoiceModels();
     void loadModelCatalog();
   }, [loadModelCatalog, loadVoiceModels]);
@@ -449,19 +468,19 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
     return onEvent(handleVoiceEvent);
   }, [handleVoiceEvent, onEvent]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
       runEpochRef.current += 1;
-      void stopPlayback({
+      void stopPlaybackRef.current?.({
         emitFinalAck: false,
         resetSeq: true,
       });
-      void stopVad();
-      void stopSession({ reason: 'panel_unmount' });
-    },
-    [stopPlayback, stopSession, stopVad],
-  );
+      void stopVadRef.current?.();
+      void stopSessionRef.current?.({ reason: 'panel_unmount' });
+    };
+  }, []);
 
   return (
     <Stack spacing={2}>
@@ -531,7 +550,7 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
               </TextField>
               {selectedCatalogId && (
                 <Alert severity="info">
-                  {catalogItems.find((item) => item.id === selectedCatalogId)?.description || ''}
+                  {selectedCatalogItem?.description || ''}
                 </Alert>
               )}
               <Button
@@ -539,7 +558,13 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
                 onClick={handleInstallCatalog}
                 disabled={isDownloadingModels || !selectedCatalogId}
               >
-                {isDownloadingModels ? '安装中...' : '一键安装内置模型'}
+                {isDownloadingModels
+                  ? isSelectedCatalogInstalled
+                    ? '重新安装中...'
+                    : '安装中...'
+                  : isSelectedCatalogInstalled
+                    ? '重新安装内置模型'
+                    : '一键安装内置模型'}
               </Button>
             </Stack>
           ) : (

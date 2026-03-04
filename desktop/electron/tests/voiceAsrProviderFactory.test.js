@@ -144,6 +144,46 @@ test('createDefaultRecognizerConfig chooses zipformer2Ctc when online mode is pr
   assert.ok(config.modelConfig.zipformer2Ctc);
 });
 
+test('zipformer2ctc model kind infers online recognizer mode by default', async () => {
+  let pickedMode = '';
+
+  const provider = createSherpaOnnxAsrProvider({
+    options: {
+      modelPath: __filename,
+      tokensPath: __filename,
+      modelKind: 'zipformer2ctc',
+      createRecognizerFn: ({ mode }) => {
+        pickedMode = mode;
+        return {
+          createStream() {
+            return {
+              acceptWaveform() {},
+              inputFinished() {},
+            };
+          },
+          async decode() {},
+          getResult() {
+            return { text: '' };
+          },
+          reset() {},
+        };
+      },
+    },
+  });
+
+  await provider.transcribe({
+    audioChunks: [
+      {
+        sampleRate: 16000,
+        sampleFormat: 'pcm_s16le',
+        pcmChunk: createPcmBuffer(1600),
+      },
+    ],
+  });
+
+  assert.equal(pickedMode, 'online');
+});
+
 test('sherpa provider emits incremental partials with dedup and final text', async () => {
   const transcripts = ['h', 'he', 'he', 'hello'];
   let decodeCount = 0;
