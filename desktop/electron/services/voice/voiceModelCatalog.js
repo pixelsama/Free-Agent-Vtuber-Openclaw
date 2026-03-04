@@ -2,7 +2,7 @@ const BUILT_IN_VOICE_MODEL_CATALOG = [
   {
     id: 'builtin-zh-int8-zipformer-kokoro-v1',
     name: '中文 ASR + Kokoro TTS（内置推荐）',
-    description: 'ASR: zipformer-ctc-zh-int8-2025-06-30, TTS: kokoro-multi-lang-v1_0',
+    description: 'ASR: zipformer-ctc-zh-int8-2025-06-30, TTS: kokoro-multi-lang-v1_0（mac 默认 CoreML）',
     asr: {
       archiveUrl:
         'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-ctc-zh-int8-2025-06-30.tar.bz2',
@@ -10,7 +10,7 @@ const BUILT_IN_VOICE_MODEL_CATALOG = [
       modelRelativePath: 'model.int8.onnx',
       tokensRelativePath: 'tokens.txt',
       modelKind: 'zipformer2ctc',
-      executionProvider: 'cpu',
+      executionProvider: 'auto',
     },
     tts: {
       archiveUrl:
@@ -20,7 +20,7 @@ const BUILT_IN_VOICE_MODEL_CATALOG = [
       voicesRelativePath: 'voices.bin',
       tokensRelativePath: 'tokens.txt',
       modelKind: 'kokoro',
-      executionProvider: 'cpu',
+      executionProvider: 'auto',
     },
   },
 ];

@@ -117,6 +117,19 @@ function createBundleId(bundleName) {
   return `${prefix}-${suffix}`;
 }
 
+function resolveCatalogExecutionProvider(value, fallback = 'cpu') {
+  const normalized = sanitizeText(value).toLowerCase();
+  if (normalized && normalized !== 'auto') {
+    return normalized;
+  }
+
+  if (process.platform === 'darwin') {
+    return 'coreml';
+  }
+
+  return fallback;
+}
+
 async function ensurePathExists(pathValue, code, message) {
   try {
     await fsp.access(pathValue);
@@ -496,7 +509,7 @@ class VoiceModelLibrary {
             modelPath: asrModelPath,
             tokensPath: asrTokensPath,
             modelKind: sanitizeOptionalText(catalogEntry.asr.modelKind, 'zipformer2ctc'),
-            executionProvider: sanitizeOptionalText(catalogEntry.asr.executionProvider, 'cpu'),
+            executionProvider: resolveCatalogExecutionProvider(catalogEntry.asr.executionProvider, 'cpu'),
           }
         : null,
       tts: catalogEntry.tts
@@ -505,7 +518,7 @@ class VoiceModelLibrary {
             voicesPath: ttsVoicesPath,
             tokensPath: ttsTokensPath,
             modelKind: sanitizeOptionalText(catalogEntry.tts.modelKind, 'kokoro'),
-            executionProvider: sanitizeOptionalText(catalogEntry.tts.executionProvider, 'cpu'),
+            executionProvider: resolveCatalogExecutionProvider(catalogEntry.tts.executionProvider, 'cpu'),
           }
         : null,
     });
