@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Box, Button, Chip, Stack, TextField } from '@mui/material';
+import { Alert, Box, Button, Chip, LinearProgress, MenuItem, Stack, TextField } from '@mui/material';
 import { useI18n } from '../../i18n/I18nContext.jsx';
 import { useSileroVad } from '../../hooks/voice/useSileroVad.js';
 import { useVoiceSession } from '../../hooks/voice/useVoiceSession.js';
 import { useVoiceTtsPlayback } from '../../hooks/voice/useVoiceTtsPlayback.js';
+import { desktopBridge } from '../../services/desktopBridge.js';
 
 const STATUS_CHIP_COLOR = {
   idle: 'default',
@@ -11,6 +12,19 @@ const STATUS_CHIP_COLOR = {
   transcribing: 'warning',
   speaking: 'success',
   error: 'error',
+};
+
+const DEFAULT_DOWNLOAD_FORM = {
+  bundleName: '',
+  asrModelUrl: '',
+  asrTokensUrl: '',
+  asrModelKind: 'zipformerctc',
+  asrExecutionProvider: '',
+  ttsModelUrl: '',
+  ttsVoicesUrl: '',
+  ttsTokensUrl: '',
+  ttsModelKind: 'kokoro',
+  ttsExecutionProvider: '',
 };
 
 function clampToInt16(sample) {
@@ -46,6 +60,23 @@ function splitFloat32ToPcmChunks(audioFloat32, frameSamples = 320) {
   return chunks;
 }
 
+function formatBytes(value) {
+  const bytes = Number.isFinite(value) ? value : 0;
+  if (bytes <= 0) {
+    return '0 B';
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 export default function VoiceSettingsPanel({ desktopMode = false }) {
   const { t } = useI18n();
   const seqRef = useRef(0);
@@ -55,6 +86,14 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   const mountedRef = useRef(true);
   const [capturedFrames, setCapturedFrames] = useState(0);
   const [isProcessingSpeech, setIsProcessingSpeech] = useState(false);
+  const [modelBundles, setModelBundles] = useState([]);
+  const [selectedBundleId, setSelectedBundleId] = useState('');
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [downloadForm, setDownloadForm] = useState(DEFAULT_DOWNLOAD_FORM);
+  const [isDownloadingModels, setIsDownloadingModels] = useState(false);
+  const [modelProgress, setModelProgress] = useState(null);
+  const [modelFeedback, setModelFeedback] = useState('');
+  const [modelError, setModelError] = useState('');
 
   const {
     sessionId,
@@ -96,6 +135,156 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   } = useSileroVad();
 
   const statusColor = useMemo(() => STATUS_CHIP_COLOR[status] || 'default', [status]);
+  const selectedBundle = useMemo(
+    () => modelBundles.find((item) => item.id === selectedBundleId) || null,
+    [modelBundles, selectedBundleId],
+  );
+
+  const loadVoiceModels = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!desktopMode) {
+        return;
+      }
+
+      if (!silent && mountedRef.current) {
+        setModelsLoading(true);
+      }
+
+      try {
+        const result = await desktopBridge.voiceModels.list();
+        if (!mountedRef.current) {
+          return;
+        }
+
+        if (!result?.ok) {
+          setModelError(result?.error?.message || '读取语音模型列表失败。');
+          setModelBundles([]);
+          setSelectedBundleId('');
+          return;
+        }
+
+        setModelError('');
+        setModelBundles(Array.isArray(result.bundles) ? result.bundles : []);
+        setSelectedBundleId(typeof result.selectedBundleId === 'string' ? result.selectedBundleId : '');
+      } catch (error) {
+        if (mountedRef.current) {
+          setModelError(error?.message || '读取语音模型列表失败。');
+          setModelBundles([]);
+          setSelectedBundleId('');
+        }
+      } finally {
+        if (mountedRef.current) {
+          setModelsLoading(false);
+        }
+      }
+    },
+    [desktopMode],
+  );
+
+  const handleDownloadFormChange = useCallback((field, value) => {
+    setDownloadForm((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  }, []);
+
+  const handleRefreshModels = useCallback(async () => {
+    setModelError('');
+    await loadVoiceModels();
+  }, [loadVoiceModels]);
+
+  const handleSelectBundle = useCallback(async () => {
+    if (!desktopMode) {
+      return;
+    }
+
+    setModelError('');
+    setModelFeedback('');
+
+    try {
+      const result = await desktopBridge.voiceModels.select(selectedBundleId);
+      if (!mountedRef.current) {
+        return;
+      }
+
+      if (!result?.ok) {
+        setModelError(result?.error?.message || '设置语音模型失败。');
+        return;
+      }
+
+      setModelBundles(Array.isArray(result.bundles) ? result.bundles : []);
+      setSelectedBundleId(typeof result.selectedBundleId === 'string' ? result.selectedBundleId : '');
+      setModelFeedback(selectedBundleId ? '语音模型已切换。' : '已恢复为环境变量配置。');
+    } catch (error) {
+      if (mountedRef.current) {
+        setModelError(error?.message || '设置语音模型失败。');
+      }
+    }
+  }, [desktopMode, selectedBundleId]);
+
+  const handleDownloadModels = useCallback(async () => {
+    if (!desktopMode) {
+      return;
+    }
+
+    setModelError('');
+    setModelFeedback('');
+    setModelProgress({
+      phase: 'started',
+      completedTasks: 0,
+      totalTasks: 0,
+      currentFile: '',
+      overallProgress: null,
+      fileDownloadedBytes: 0,
+      fileTotalBytes: 0,
+    });
+    setIsDownloadingModels(true);
+
+    const payload = {
+      bundleName: downloadForm.bundleName,
+      asr: {
+        modelUrl: downloadForm.asrModelUrl,
+        tokensUrl: downloadForm.asrTokensUrl,
+        modelKind: downloadForm.asrModelKind,
+        executionProvider: downloadForm.asrExecutionProvider,
+      },
+      tts: {
+        modelUrl: downloadForm.ttsModelUrl,
+        voicesUrl: downloadForm.ttsVoicesUrl,
+        tokensUrl: downloadForm.ttsTokensUrl,
+        modelKind: downloadForm.ttsModelKind,
+        executionProvider: downloadForm.ttsExecutionProvider,
+      },
+    };
+
+    try {
+      const result = await desktopBridge.voiceModels.download(payload);
+      if (!mountedRef.current) {
+        return;
+      }
+
+      if (!result?.ok) {
+        setModelError(result?.error?.message || '下载语音模型失败。');
+        return;
+      }
+
+      setModelBundles(Array.isArray(result.bundles) ? result.bundles : []);
+      setSelectedBundleId(typeof result.selectedBundleId === 'string' ? result.selectedBundleId : '');
+      setModelFeedback('语音模型下载完成并已自动选中。');
+      setDownloadForm((previous) => ({
+        ...previous,
+        bundleName: '',
+      }));
+    } catch (error) {
+      if (mountedRef.current) {
+        setModelError(error?.message || '下载语音模型失败。');
+      }
+    } finally {
+      if (mountedRef.current) {
+        setIsDownloadingModels(false);
+      }
+    }
+  }, [desktopMode, downloadForm]);
 
   const enqueueSpeechTask = useCallback((task) => {
     speechQueueRef.current = speechQueueRef.current
@@ -233,6 +422,32 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   }, [stopPlayback, stopTts]);
 
   useEffect(() => {
+    void loadVoiceModels();
+  }, [loadVoiceModels]);
+
+  useEffect(() => {
+    if (!desktopMode) {
+      return () => {};
+    }
+
+    return desktopBridge.voiceModels.onDownloadProgress((payload = {}) => {
+      if (!mountedRef.current) {
+        return;
+      }
+
+      setModelProgress({
+        phase: payload.phase || 'running',
+        completedTasks: Number.isFinite(payload.completedTasks) ? payload.completedTasks : 0,
+        totalTasks: Number.isFinite(payload.totalTasks) ? payload.totalTasks : 0,
+        currentFile: typeof payload.currentFile === 'string' ? payload.currentFile : '',
+        overallProgress: Number.isFinite(payload.overallProgress) ? payload.overallProgress : null,
+        fileDownloadedBytes: Number.isFinite(payload.fileDownloadedBytes) ? payload.fileDownloadedBytes : 0,
+        fileTotalBytes: Number.isFinite(payload.fileTotalBytes) ? payload.fileTotalBytes : 0,
+      });
+    });
+  }, [desktopMode]);
+
+  useEffect(() => {
     return onEvent(handleVoiceEvent);
   }, [handleVoiceEvent, onEvent]);
 
@@ -256,6 +471,153 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
       <Alert severity="info">{t('voice.vadHint')}</Alert>
       {!desktopMode && <Alert severity="warning">{t('voice.desktopOnly')}</Alert>}
       {desktopMode && <Alert severity="info">{t('voice.liveCaptureHint')}</Alert>}
+      {desktopMode && (
+        <Stack spacing={1.5} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
+          <Box sx={{ fontWeight: 600 }}>本地语音模型管理</Box>
+          <TextField
+            select
+            label="当前模型包"
+            value={selectedBundleId}
+            onChange={(event) => setSelectedBundleId(event.target.value)}
+            disabled={modelsLoading || isDownloadingModels}
+            fullWidth
+          >
+            <MenuItem value="">不使用内置模型（回退环境变量）</MenuItem>
+            {modelBundles.map((item) => (
+              <MenuItem key={item.id} value={item.id}>
+                {item.name}
+              </MenuItem>
+            ))}
+          </TextField>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleSelectBundle}
+              disabled={modelsLoading || isDownloadingModels}
+            >
+              设为当前
+            </Button>
+            <Button
+              variant="text"
+              size="small"
+              onClick={handleRefreshModels}
+              disabled={modelsLoading || isDownloadingModels}
+            >
+              刷新列表
+            </Button>
+          </Stack>
+
+          {!!selectedBundle?.asr?.modelPath && (
+            <TextField label="ASR Model Path" value={selectedBundle.asr.modelPath} disabled fullWidth />
+          )}
+          {!!selectedBundle?.tts?.modelPath && (
+            <TextField label="TTS Model Path" value={selectedBundle.tts.modelPath} disabled fullWidth />
+          )}
+
+          <TextField
+            label="模型包名称（可选）"
+            value={downloadForm.bundleName}
+            onChange={(event) => handleDownloadFormChange('bundleName', event.target.value)}
+            placeholder="例如：zh-en + kokoro"
+            disabled={isDownloadingModels}
+            fullWidth
+          />
+          <TextField
+            label="ASR 模型 URL（.onnx）"
+            value={downloadForm.asrModelUrl}
+            onChange={(event) => handleDownloadFormChange('asrModelUrl', event.target.value)}
+            disabled={isDownloadingModels}
+            fullWidth
+          />
+          <TextField
+            label="ASR tokens URL（tokens.txt）"
+            value={downloadForm.asrTokensUrl}
+            onChange={(event) => handleDownloadFormChange('asrTokensUrl', event.target.value)}
+            disabled={isDownloadingModels}
+            fullWidth
+          />
+          <Stack direction="row" spacing={1}>
+            <TextField
+              label="ASR Model Kind"
+              value={downloadForm.asrModelKind}
+              onChange={(event) => handleDownloadFormChange('asrModelKind', event.target.value)}
+              disabled={isDownloadingModels}
+              fullWidth
+            />
+            <TextField
+              label="ASR Provider"
+              value={downloadForm.asrExecutionProvider}
+              onChange={(event) => handleDownloadFormChange('asrExecutionProvider', event.target.value)}
+              placeholder="cpu/coreml/cuda"
+              disabled={isDownloadingModels}
+              fullWidth
+            />
+          </Stack>
+          <TextField
+            label="TTS 模型 URL（.onnx）"
+            value={downloadForm.ttsModelUrl}
+            onChange={(event) => handleDownloadFormChange('ttsModelUrl', event.target.value)}
+            disabled={isDownloadingModels}
+            fullWidth
+          />
+          <TextField
+            label="TTS voices URL（voices.bin）"
+            value={downloadForm.ttsVoicesUrl}
+            onChange={(event) => handleDownloadFormChange('ttsVoicesUrl', event.target.value)}
+            disabled={isDownloadingModels}
+            fullWidth
+          />
+          <TextField
+            label="TTS tokens URL（tokens.txt）"
+            value={downloadForm.ttsTokensUrl}
+            onChange={(event) => handleDownloadFormChange('ttsTokensUrl', event.target.value)}
+            disabled={isDownloadingModels}
+            fullWidth
+          />
+          <Stack direction="row" spacing={1}>
+            <TextField
+              label="TTS Model Kind"
+              value={downloadForm.ttsModelKind}
+              onChange={(event) => handleDownloadFormChange('ttsModelKind', event.target.value)}
+              disabled={isDownloadingModels}
+              fullWidth
+            />
+            <TextField
+              label="TTS Provider"
+              value={downloadForm.ttsExecutionProvider}
+              onChange={(event) => handleDownloadFormChange('ttsExecutionProvider', event.target.value)}
+              placeholder="cpu/coreml/cuda"
+              disabled={isDownloadingModels}
+              fullWidth
+            />
+          </Stack>
+          <Button
+            variant="contained"
+            onClick={handleDownloadModels}
+            disabled={isDownloadingModels || modelsLoading}
+          >
+            {isDownloadingModels ? '下载中...' : '下载并安装模型'}
+          </Button>
+
+          {!!modelProgress && (
+            <Stack spacing={0.5}>
+              <LinearProgress
+                variant={typeof modelProgress.overallProgress === 'number' ? 'determinate' : 'indeterminate'}
+                value={typeof modelProgress.overallProgress === 'number' ? modelProgress.overallProgress * 100 : 0}
+              />
+              <Box sx={{ color: 'text.secondary', fontSize: 12 }}>
+                {modelProgress.currentFile || '准备下载...'} · {modelProgress.completedTasks}/
+                {modelProgress.totalTasks || '?'} · {formatBytes(modelProgress.fileDownloadedBytes)}/
+                {formatBytes(modelProgress.fileTotalBytes)}
+              </Box>
+            </Stack>
+          )}
+
+          {!!modelError && <Alert severity="warning">{modelError}</Alert>}
+          {!!modelFeedback && <Alert severity="success">{modelFeedback}</Alert>}
+        </Stack>
+      )}
 
       <Stack direction="row" spacing={1} alignItems="center">
         <Chip size="small" color={statusColor} label={`${t('voice.status')}: ${status}`} />

@@ -133,6 +133,21 @@ const live2dModels = {
   },
 };
 
+const voiceModels = {
+  list() {
+    return ipcRenderer.invoke('voice-models:list');
+  },
+  select(payload) {
+    return ipcRenderer.invoke('voice-models:select', payload);
+  },
+  download(payload) {
+    return ipcRenderer.invoke('voice-models:download', payload);
+  },
+  onDownloadProgress(handler) {
+    return onChannel('voice-models:download-progress', handler);
+  },
+};
+
 contextBridge.exposeInMainWorld('desktop', {
   isElectron: true,
   platform: process.platform,
@@ -142,4 +157,5 @@ contextBridge.exposeInMainWorld('desktop', {
   windowControls,
   voice,
   live2dModels,
+  voiceModels,
 });

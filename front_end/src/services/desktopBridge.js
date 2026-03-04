@@ -387,6 +387,53 @@ export const desktopBridge = {
       return api.voice.onFlowControl(handler);
     },
   },
+  voiceModels: {
+    async list() {
+      const api = getDesktopApi();
+      if (!api?.voiceModels?.list) {
+        return {
+          ok: false,
+          bundles: [],
+          selectedBundleId: '',
+          rootDir: '',
+        };
+      }
+      return api.voiceModels.list();
+    },
+    async select(bundleId) {
+      const api = getDesktopApi();
+      if (!api?.voiceModels?.select) {
+        return {
+          ok: false,
+          error: {
+            code: 'desktop_voice_models_unavailable',
+            message: '当前环境不支持语音模型管理。',
+          },
+        };
+      }
+      return api.voiceModels.select({ bundleId });
+    },
+    async download(payload = {}) {
+      const api = getDesktopApi();
+      if (!api?.voiceModels?.download) {
+        return {
+          ok: false,
+          error: {
+            code: 'desktop_voice_models_unavailable',
+            message: '当前环境不支持语音模型下载。',
+          },
+        };
+      }
+      return api.voiceModels.download(payload);
+    },
+    onDownloadProgress(handler) {
+      const api = getDesktopApi();
+      if (!api?.voiceModels?.onDownloadProgress || typeof handler !== 'function') {
+        return () => {};
+      }
+      return api.voiceModels.onDownloadProgress(handler);
+    },
+  },
   window: {
     getPlatformSync() {
       const api = getDesktopApi();

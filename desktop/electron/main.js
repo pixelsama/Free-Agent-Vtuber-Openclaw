@@ -4,9 +4,11 @@ const { app, BrowserWindow, shell, ipcMain, protocol, screen } = require('electr
 const { registerChatStreamIpc } = require('./ipc/chatStream');
 const { registerLive2DModelsIpc } = require('./ipc/live2dModels');
 const { registerSettingsIpc } = require('./ipc/settings');
+const { registerVoiceModelsIpc } = require('./ipc/voiceModels');
 const { registerVoiceSessionIpc } = require('./ipc/voiceSession');
 const { Live2DModelLibrary, MODEL_PROTOCOL } = require('./services/live2dModelLibrary');
 const { SettingsStore } = require('./services/settingsStore');
+const { VoiceModelLibrary } = require('./services/voice/voiceModelLibrary');
 const { WindowModeManager } = require('./window/windowModeManager');
 const { TrayManager } = require('./window/trayManager');
 const { registerModeIpc } = require('./window/modeIpc');
@@ -28,12 +30,14 @@ let mainWindow = null;
 let disposeChatStreamHandlers = null;
 let disposeModeHandlers = null;
 let disposeLive2DModelsHandlers = null;
+let disposeVoiceModelsHandlers = null;
 let disposeVoiceSessionHandlers = null;
 let startChatStreamFromMain = null;
 let settingsStore = null;
 let windowModeManager = null;
 let trayManager = null;
 let live2dModelLibrary = null;
+let voiceModelLibrary = null;
 let isQuitting = false;
 
 function isTruthyEnv(value) {
@@ -217,6 +221,8 @@ async function bootstrap() {
   await settingsStore.init();
   live2dModelLibrary = new Live2DModelLibrary(app);
   await live2dModelLibrary.init();
+  voiceModelLibrary = new VoiceModelLibrary(app);
+  await voiceModelLibrary.init();
   registerModelProtocol();
 
   registerSettingsIpc({ ipcMain, settingsStore });
@@ -253,6 +259,16 @@ async function bootstrap() {
     ipcMain,
     getWindow: () => mainWindow,
     modelLibrary: live2dModelLibrary,
+  });
+  disposeVoiceModelsHandlers = registerVoiceModelsIpc({
+    ipcMain,
+    voiceModelLibrary,
+    emitDownloadProgress: (payload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+      mainWindow.webContents.send('voice-models:download-progress', payload);
+    },
   });
 
   const chatStreamControl = registerChatStreamIpc({
@@ -308,6 +324,12 @@ async function bootstrap() {
       }
     },
     autoTtsOnAsrFinal: isTruthyEnv(process.env.VOICE_TTS_AUTO_ON_ASR_FINAL),
+    resolveVoiceEnv: () => {
+      if (!voiceModelLibrary) {
+        return process.env;
+      }
+      return voiceModelLibrary.getRuntimeEnv(process.env);
+    },
     ttsBackpressureTimeoutMs: process.env.VOICE_TTS_BACKPRESSURE_TIMEOUT_MS,
   });
 
@@ -350,6 +372,9 @@ app.on('before-quit', () => {
   }
   if (disposeLive2DModelsHandlers) {
     disposeLive2DModelsHandlers();
+  }
+  if (disposeVoiceModelsHandlers) {
+    disposeVoiceModelsHandlers();
   }
   if (disposeVoiceSessionHandlers) {
     disposeVoiceSessionHandlers();

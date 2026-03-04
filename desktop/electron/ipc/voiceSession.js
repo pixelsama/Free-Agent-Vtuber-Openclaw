@@ -69,6 +69,39 @@ function normalizePositiveInteger(value, fallback) {
   return Math.floor(parsed);
 }
 
+function isTruthyEnv(value, fallback = false) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    return true;
+  }
+
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false;
+  }
+
+  return fallback;
+}
+
+function buildVoiceEnvFingerprint(env = {}) {
+  const entries = Object.keys(env)
+    .filter((key) => key.startsWith('VOICE_'))
+    .sort()
+    .map((key) => `${key}=${env[key] ?? ''}`);
+  return entries.join('\n');
+}
+
 function createTtsBackpressureTimeoutError(timeoutMs) {
   const error = new Error(`No playback ACK received for ${timeoutMs}ms.`);
   error.code = 'voice_tts_backpressure_timeout';
@@ -205,11 +238,13 @@ function registerVoiceSessionIpc({
   createTtsServiceImpl = createTtsService,
   onAsrFinal,
   autoTtsOnAsrFinal = false,
+  resolveVoiceEnv,
   ttsBackpressureTimeoutMs = DEFAULT_TTS_BACKPRESSURE_TIMEOUT_MS,
 }) {
   const sessionMap = new Map();
-  const asrService = createAsrServiceImpl();
-  const ttsService = createTtsServiceImpl();
+  let cachedAsrService = null;
+  let cachedTtsService = null;
+  let cachedEnvFingerprint = '';
 
   const sendEvent = (event) => {
     emitEvent(event);
@@ -244,6 +279,27 @@ function registerVoiceSessionIpc({
     ttsBackpressureTimeoutMs,
     DEFAULT_TTS_BACKPRESSURE_TIMEOUT_MS,
   );
+
+  const resolveRuntime = () => {
+    const env =
+      typeof resolveVoiceEnv === 'function'
+        ? resolveVoiceEnv()
+        : process.env;
+
+    const fingerprint = buildVoiceEnvFingerprint(env);
+    if (!cachedAsrService || !cachedTtsService || cachedEnvFingerprint !== fingerprint) {
+      cachedAsrService = createAsrServiceImpl({ env });
+      cachedTtsService = createTtsServiceImpl({ env });
+      cachedEnvFingerprint = fingerprint;
+    }
+
+    return {
+      env,
+      asrService: cachedAsrService,
+      ttsService: cachedTtsService,
+      autoTtsOnAsrFinal: isTruthyEnv(env?.VOICE_TTS_AUTO_ON_ASR_FINAL, autoTtsOnAsrFinal),
+    };
+  };
 
   const buildSessionState = (sessionId, mode) => ({
     sessionId,
@@ -372,8 +428,9 @@ function registerVoiceSessionIpc({
     sessionState.asrController = new AbortController();
 
     try {
+      const runtime = resolveRuntime();
       let partialSeq = 0;
-      const result = await asrService.transcribe({
+      const result = await runtime.asrService.transcribe({
         audioChunks: committedChunks,
         signal: sessionState.asrController.signal,
         onPartial: (text) => {
@@ -404,11 +461,11 @@ function registerVoiceSessionIpc({
         });
       }
 
-      if (autoTtsOnAsrFinal && finalText) {
+      if (runtime.autoTtsOnAsrFinal && finalText) {
         await synthesizeTts({
           sessionId,
           text: finalText,
-          ttsService,
+          ttsService: runtime.ttsService,
           sendEvent,
           sendDone,
           sendError,
