@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 import argparse
-import base64
 import json
 import sys
 from pathlib import Path
 
 
-def emit(payload, exit_code=0):
-  sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+JSON_PREFIX = '__ASR_JSON__'
+
+
+def emit(payload):
+  sys.stdout.write(JSON_PREFIX + json.dumps(payload, ensure_ascii=False) + '\n')
   sys.stdout.flush()
-  raise SystemExit(exit_code)
+
+
+def emit_error(message, request_id='', code='asr_worker_error'):
+  emit({
+      'type': 'error',
+      'requestId': request_id,
+      'code': code,
+      'message': message,
+  })
 
 
 def normalize_device_name(requested_device):
@@ -46,7 +56,7 @@ def resolve_device_candidates(requested_device, torch_module):
   if has_mps_backend(torch_module):
     candidates.append('mps')
   candidates.append('cpu')
-  # preserve order, remove duplicates
+
   seen = set()
   out = []
   for item in candidates:
@@ -55,15 +65,6 @@ def resolve_device_candidates(requested_device, torch_module):
     seen.add(item)
     out.append(item)
   return out
-
-
-def select_dtype_for_device(torch_module, device):
-  if device.startswith('cuda'):
-    return torch_module.bfloat16
-  if device == 'mps':
-    # float16 is usually faster and better supported than bfloat16 on MPS.
-    return torch_module.float16
-  return torch_module.float32
 
 
 def read_model_config_text(model_dir):
@@ -130,7 +131,6 @@ def load_audio_for_sensevoice(audio_path):
     try:
       import librosa
       samples = librosa.resample(samples, orig_sr=sample_rate, target_sr=target_sample_rate)
-      sample_rate = target_sample_rate
     except Exception as error:  # pylint: disable=broad-except
       raise RuntimeError(
           f'Failed to resample audio from {sample_rate}Hz to {target_sample_rate}Hz: {error}'
@@ -139,26 +139,39 @@ def load_audio_for_sensevoice(audio_path):
   return np.asarray(samples, dtype=np.float32)
 
 
-def run_asr_once(args, device):
+def build_model(model_dir, requested_device):
+  import torch
   from funasr import AutoModel
 
-  is_sensevoice = is_sensevoice_model(args.model_dir)
-  model = AutoModel(
-      model=args.model_dir,
-      device=device,
-      disable_update=True,
-  )
+  candidates = resolve_device_candidates(requested_device, torch)
+  errors = []
+  for device in candidates:
+    try:
+      model = AutoModel(
+          model=model_dir,
+          device=device,
+          disable_update=True,
+      )
+      return model, device
+    except Exception as error:  # pylint: disable=broad-except
+      errors.append(f'{device}: {error}')
+      if len(candidates) == 1:
+        raise
 
+  raise RuntimeError('Failed to initialize ASR model on all devices: ' + '; '.join(errors))
+
+
+def transcribe_once(model, model_dir, audio_path, language):
+  is_sensevoice = is_sensevoice_model(model_dir)
   if is_sensevoice:
-    audio_samples = load_audio_for_sensevoice(args.audio_path)
+    audio_samples = load_audio_for_sensevoice(audio_path)
     result = model.generate(
         input=[audio_samples],
         cache={},
-        language=normalize_asr_language(args.language),
+        language=normalize_asr_language(language),
         use_itn=True,
         batch_size_s=30,
     )
-
     text = extract_asr_text(result)
     if text:
       try:
@@ -169,157 +182,90 @@ def run_asr_once(args, device):
     return text
 
   result = model.generate(
-      input=[args.audio_path],
+      input=[audio_path],
       cache={},
       batch_size=1,
-      language=args.language,
+      language=language,
       itn=True,
   )
-
   return extract_asr_text(result)
 
 
-def run_asr(args):
-  import torch
-
-  candidates = resolve_device_candidates(args.device, torch)
-  errors = []
-  for device in candidates:
-    try:
-      text = run_asr_once(args, device)
-      return {
-          'text': text,
-          'deviceUsed': device,
-      }
-    except Exception as error:  # pylint: disable=broad-except
-      errors.append(f'{device}: {error}')
-      # We only retry when there are fallback candidates.
-      if len(candidates) == 1:
-        raise
-
-  raise RuntimeError('ASR failed on all candidate devices: ' + '; '.join(errors))
-
-
-def run_tts_once(args, device):
-  import numpy as np
-  import torch
-  from qwen_tts import Qwen3TTSModel
-
-  dtype = select_dtype_for_device(torch, device)
-  model = Qwen3TTSModel.from_pretrained(
-      args.model_dir,
-      device_map=device,
-      dtype=dtype,
-  )
-
-  tts_mode = (args.tts_mode or 'custom_voice').strip().lower()
-  language = args.language or 'Chinese'
-
-  if tts_mode == 'voice_design':
-    wavs, sample_rate = model.generate_voice_design(
-        text=args.text,
-        language=language,
-        instruct=args.instruct or '',
-    )
-  else:
-    wavs, sample_rate = model.generate_custom_voice(
-        text=args.text,
-        language=language,
-        speaker=args.speaker or 'Vivian',
-        instruct=args.instruct or '',
-    )
-
-  if not wavs:
-    return {
-        'sampleRate': int(sample_rate),
-        'pcmS16LeBase64': '',
-    }
-
-  wav = np.asarray(wavs[0], dtype=np.float32)
-  wav = np.clip(wav, -1.0, 1.0)
-  pcm = (wav * 32767.0).astype(np.int16).tobytes()
-
-  return {
-      'sampleRate': int(sample_rate),
-      'pcmS16LeBase64': base64.b64encode(pcm).decode('ascii'),
-  }
-
-
-def run_tts(args):
-  import torch
-
-  candidates = resolve_device_candidates(args.device, torch)
-  errors = []
-  for device in candidates:
-    try:
-      payload = run_tts_once(args, device)
-      payload['deviceUsed'] = device
-      return payload
-    except Exception as error:  # pylint: disable=broad-except
-      errors.append(f'{device}: {error}')
-      if len(candidates) == 1:
-        raise
-
-  raise RuntimeError('TTS failed on all candidate devices: ' + '; '.join(errors))
-
-
 def parse_args():
-  parser = argparse.ArgumentParser(description='Free Agent OpenClaw Python voice bridge')
-  parser.add_argument('--task', required=True, choices=['asr', 'tts'])
+  parser = argparse.ArgumentParser(description='Free Agent OpenClaw resident ASR worker')
+  parser.add_argument('--model-dir', required=True)
   parser.add_argument('--device', default='auto')
-
-  parser.add_argument('--model-dir')
-  parser.add_argument('--tokenizer-dir')
-
-  parser.add_argument('--audio-path')
   parser.add_argument('--language', default='auto')
-
-  parser.add_argument('--text')
-  parser.add_argument('--tts-mode', default='custom_voice')
-  parser.add_argument('--speaker', default='Vivian')
-  parser.add_argument('--instruct', default='')
-
   return parser.parse_args()
 
 
-def validate_args(args):
+def main():
+  args = parse_args()
   model_dir = (args.model_dir or '').strip()
   if not model_dir:
     raise ValueError('Missing --model-dir')
   if not Path(model_dir).exists():
     raise ValueError(f'Model directory does not exist: {model_dir}')
 
-  if args.task == 'asr':
-    audio_path = (args.audio_path or '').strip()
+  model, device_used = build_model(model_dir, args.device)
+  emit({
+      'type': 'ready',
+      'deviceUsed': device_used,
+  })
+
+  for raw in sys.stdin:
+    line = (raw or '').strip()
+    if not line:
+      continue
+
+    request = None
+    try:
+      request = json.loads(line)
+    except Exception:  # pylint: disable=broad-except
+      emit_error('Invalid JSON request payload.', code='invalid_request')
+      continue
+
+    request_type = str(request.get('type', '')).strip().lower()
+    request_id = str(request.get('requestId', '')).strip()
+
+    if request_type == 'shutdown':
+      emit({
+          'type': 'shutdown-ack',
+      })
+      return
+
+    if request_type != 'transcribe':
+      emit_error('Unsupported request type.', request_id=request_id, code='unsupported_request')
+      continue
+
+    audio_path = str(request.get('audioPath', '')).strip()
     if not audio_path:
-      raise ValueError('Missing --audio-path')
+      emit_error('Missing audioPath.', request_id=request_id, code='missing_audio_path')
+      continue
     if not Path(audio_path).exists():
-      raise ValueError(f'Audio file does not exist: {audio_path}')
+      emit_error(
+          f'Audio file does not exist: {audio_path}',
+          request_id=request_id,
+          code='audio_path_missing',
+      )
+      continue
 
-  if args.task == 'tts':
-    text = (args.text or '').strip()
-    if not text:
-      raise ValueError('Missing --text')
-
-
-def main():
-  args = parse_args()
-  try:
-    validate_args(args)
-
-    if args.task == 'asr':
-      payload = run_asr(args)
-    elif args.task == 'tts':
-      payload = run_tts(args)
-    else:
-      raise ValueError(f'Unsupported task: {args.task}')
-
-    emit(payload)
-  except Exception as error:  # pylint: disable=broad-except
-    sys.stderr.write(f'{type(error).__name__}: {error}\n')
-    sys.stderr.flush()
-    raise SystemExit(1)
+    language = str(request.get('language', '')).strip() or args.language
+    try:
+      text = transcribe_once(model, model_dir, audio_path, language)
+      emit({
+          'type': 'result',
+          'requestId': request_id,
+          'text': text,
+          'deviceUsed': device_used,
+      })
+    except Exception as error:  # pylint: disable=broad-except
+      emit_error(str(error), request_id=request_id, code='transcribe_failed')
 
 
 if __name__ == '__main__':
-  main()
+  try:
+    main()
+  except Exception as error:  # pylint: disable=broad-except
+    emit_error(str(error), code='worker_bootstrap_failed')
+    raise SystemExit(1)

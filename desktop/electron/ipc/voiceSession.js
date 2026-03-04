@@ -406,6 +406,14 @@ function registerVoiceSessionIpc({
     sessionMap.set(sessionId, sessionState);
     sendState(sessionId, sessionState.status);
 
+    // Pre-warm ASR worker/model in background to reduce first-turn latency.
+    const runtime = resolveRuntime();
+    if (runtime?.asrService && typeof runtime.asrService.warmup === 'function') {
+      Promise.resolve(runtime.asrService.warmup()).catch((error) => {
+        console.warn('ASR warmup failed:', error);
+      });
+    }
+
     return {
       ok: true,
       sessionId,

@@ -88,6 +88,32 @@ test('voice session start -> chunk -> commit emits state and asr events', async 
   assert.equal(emitted[3].text, 'hello');
 });
 
+test('voice session start triggers background asr warmup when available', async () => {
+  const ipcMain = createIpcMainMock();
+  let warmupCalls = 0;
+
+  registerVoiceSessionIpc({
+    ipcMain,
+    emitEvent: () => {},
+    createAsrServiceImpl: () => ({
+      async warmup() {
+        warmupCalls += 1;
+      },
+      async transcribe() {
+        return { text: '' };
+      },
+    }),
+  });
+
+  await ipcMain.invoke('voice:session:start', {
+    sessionId: 'warmup-s1',
+    mode: 'vad',
+  });
+
+  await waitFor(() => warmupCalls >= 1);
+  assert.equal(warmupCalls, 1);
+});
+
 test('voice playback ack emits flow-control pause/resume', async () => {
   const ipcMain = createIpcMainMock();
   const flowEvents = [];
