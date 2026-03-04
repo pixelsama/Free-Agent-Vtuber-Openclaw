@@ -3,6 +3,7 @@ import { Alert, Box, Button, Chip, Stack, TextField } from '@mui/material';
 import { useI18n } from '../../i18n/I18nContext.jsx';
 import { useSileroVad } from '../../hooks/voice/useSileroVad.js';
 import { useVoiceSession } from '../../hooks/voice/useVoiceSession.js';
+import { useVoiceTtsPlayback } from '../../hooks/voice/useVoiceTtsPlayback.js';
 
 const STATUS_CHIP_COLOR = {
   idle: 'default',
@@ -68,7 +69,22 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
     commitInput,
     stopSession,
     stopTts,
+    sendPlaybackAck,
+    onEvent,
   } = useVoiceSession({ desktopMode });
+
+  const {
+    handleVoiceEvent,
+    stopPlayback,
+    isPlaying: isPlayingTts,
+    bufferedMs: ttsBufferedMs,
+    lastCodec: ttsCodec,
+    playbackError,
+  } = useVoiceTtsPlayback({
+    desktopMode,
+    sessionId,
+    sendPlaybackAck,
+  });
 
   const {
     isLoading: isVadLoading,
@@ -157,6 +173,11 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   );
 
   const handleStart = useCallback(async () => {
+    await stopPlayback({
+      emitFinalAck: false,
+      resetSeq: true,
+    });
+
     const started = await startSession({ mode: 'vad' });
     if (!started?.ok) {
       return;
@@ -176,7 +197,7 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
       runEpochRef.current += 1;
       await stopSession({ reason: 'vad_start_failed' });
     }
-  }, [handleSpeechEnd, startSession, startVad, stopSession]);
+  }, [handleSpeechEnd, startSession, startVad, stopPlayback, stopSession]);
 
   const handleCommit = useCallback(async () => {
     await enqueueSpeechTask(async () => {
@@ -192,25 +213,41 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
 
   const handleStop = useCallback(async () => {
     runEpochRef.current += 1;
+    await stopPlayback({
+      emitFinalAck: true,
+      resetSeq: true,
+    });
     await stopVad();
     await stopSession({ reason: 'manual' });
     seqRef.current = 0;
     chunkIdRef.current = 0;
     setCapturedFrames(0);
-  }, [stopSession, stopVad]);
+  }, [stopPlayback, stopSession, stopVad]);
 
   const handleStopTts = useCallback(async () => {
+    await stopPlayback({
+      emitFinalAck: true,
+      resetSeq: false,
+    });
     await stopTts({ reason: 'manual' });
-  }, [stopTts]);
+  }, [stopPlayback, stopTts]);
+
+  useEffect(() => {
+    return onEvent(handleVoiceEvent);
+  }, [handleVoiceEvent, onEvent]);
 
   useEffect(
     () => () => {
       mountedRef.current = false;
       runEpochRef.current += 1;
+      void stopPlayback({
+        emitFinalAck: false,
+        resetSeq: true,
+      });
       void stopVad();
       void stopSession({ reason: 'panel_unmount' });
     },
-    [stopSession, stopVad],
+    [stopPlayback, stopSession, stopVad],
   );
 
   return (
@@ -248,6 +285,12 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
       <TextField
         label={t('voice.flowControl')}
         value={`${flowControl.action} (${flowControl.bufferedMs}ms)`}
+        disabled
+        fullWidth
+      />
+      <TextField
+        label="TTS Playback"
+        value={`${isPlayingTts ? 'playing' : 'idle'} (${Math.floor(ttsBufferedMs)}ms / ${ttsCodec || 'n/a'})`}
         disabled
         fullWidth
       />
@@ -289,6 +332,7 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
 
       {!!lastError && <Alert severity="error">{lastError}</Alert>}
       {!!vadError && <Alert severity="warning">{vadError}</Alert>}
+      {!!playbackError && <Alert severity="warning">{playbackError}</Alert>}
     </Stack>
   );
 }

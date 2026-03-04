@@ -25,6 +25,7 @@ function normalizeVoiceError(error) {
 
 export function useVoiceSession({ desktopMode = desktopBridge.isDesktop() } = {}) {
   const sessionIdRef = useRef('');
+  const eventSubscribersRef = useRef(new Set());
   const [sessionId, setSessionId] = useState('');
   const [status, setStatus] = useState(STATUS_IDLE);
   const [lastPartialText, setLastPartialText] = useState('');
@@ -69,6 +70,14 @@ export function useVoiceSession({ desktopMode = desktopBridge.isDesktop() } = {}
       if (event.type === 'done' && event.stage === 'session') {
         setStatus(STATUS_IDLE);
         setSessionIdWithRef('');
+      }
+
+      for (const subscriber of eventSubscribersRef.current) {
+        try {
+          subscriber(event);
+        } catch (error) {
+          console.error('Voice event subscriber failed:', error);
+        }
       }
     });
 
@@ -212,6 +221,17 @@ export function useVoiceSession({ desktopMode = desktopBridge.isDesktop() } = {}
     [],
   );
 
+  const onEvent = useCallback((handler) => {
+    if (typeof handler !== 'function') {
+      return () => {};
+    }
+
+    eventSubscribersRef.current.add(handler);
+    return () => {
+      eventSubscribersRef.current.delete(handler);
+    };
+  }, []);
+
   return useMemo(
     () => ({
       sessionId,
@@ -227,6 +247,7 @@ export function useVoiceSession({ desktopMode = desktopBridge.isDesktop() } = {}
       stopSession,
       stopTts,
       sendPlaybackAck,
+      onEvent,
     }),
     [
       sessionId,
@@ -242,6 +263,7 @@ export function useVoiceSession({ desktopMode = desktopBridge.isDesktop() } = {}
       stopSession,
       stopTts,
       sendPlaybackAck,
+      onEvent,
     ],
   );
 }

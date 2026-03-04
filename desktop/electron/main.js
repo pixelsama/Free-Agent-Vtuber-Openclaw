@@ -36,6 +36,15 @@ let trayManager = null;
 let live2dModelLibrary = null;
 let isQuitting = false;
 
+function isTruthyEnv(value) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
 function registerWindowControlIpc() {
   ipcMain.handle('window:get-platform', () => ({
     platform: process.platform,
@@ -298,6 +307,8 @@ async function bootstrap() {
         console.error('Failed to auto-start chat stream from ASR final:', error);
       }
     },
+    autoTtsOnAsrFinal: isTruthyEnv(process.env.VOICE_TTS_AUTO_ON_ASR_FINAL),
+    ttsBackpressureTimeoutMs: process.env.VOICE_TTS_BACKPRESSURE_TIMEOUT_MS,
   });
 
   await createMainWindow();

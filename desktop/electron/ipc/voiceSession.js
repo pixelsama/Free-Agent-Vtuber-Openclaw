@@ -6,6 +6,16 @@ const SESSION_STATUS_LISTENING = 'listening';
 const SESSION_STATUS_TRANSCRIBING = 'transcribing';
 const SESSION_STATUS_SPEAKING = 'speaking';
 const SESSION_STATUS_ERROR = 'error';
+const TTS_PAUSE_HIGH_WATERMARK_MS = 2000;
+const TTS_RESUME_LOW_WATERMARK_MS = 800;
+const DEFAULT_TTS_BACKPRESSURE_TIMEOUT_MS = 5000;
+const TTS_ACK_WATCHDOG_INTERVAL_MS = 200;
+
+function createAbortError() {
+  const error = new Error('aborted');
+  error.name = 'AbortError';
+  return error;
+}
 
 function toVoiceError(error, fallbackCode = 'voice_unknown_error', fallbackStage = 'unknown') {
   if (error?.name === 'AbortError') {
@@ -50,6 +60,143 @@ function normalizeSeq(value) {
   return Math.max(0, Math.floor(value));
 }
 
+function normalizePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.floor(parsed);
+}
+
+function createTtsBackpressureTimeoutError(timeoutMs) {
+  const error = new Error(`No playback ACK received for ${timeoutMs}ms.`);
+  error.code = 'voice_tts_backpressure_timeout';
+  error.stage = 'speaking';
+  error.retriable = true;
+  return error;
+}
+
+function clearTtsAckWatchdog(sessionState) {
+  if (sessionState?.ttsAckWatchdog) {
+    clearInterval(sessionState.ttsAckWatchdog);
+    sessionState.ttsAckWatchdog = null;
+  }
+}
+
+function resolveTtsResumeWaiters(sessionState) {
+  if (!sessionState?.ttsResumeWaiters) {
+    return;
+  }
+
+  for (const resolve of sessionState.ttsResumeWaiters) {
+    try {
+      resolve();
+    } catch {
+      // noop
+    }
+  }
+
+  sessionState.ttsResumeWaiters.clear();
+}
+
+function setTtsFlowPaused(sessionState, paused) {
+  if (!sessionState) {
+    return false;
+  }
+
+  if (sessionState.ttsFlowPaused === paused) {
+    return false;
+  }
+
+  sessionState.ttsFlowPaused = paused;
+  if (!paused) {
+    resolveTtsResumeWaiters(sessionState);
+  }
+
+  return true;
+}
+
+async function waitForTtsResume({ sessionState, signal, timeoutMs }) {
+  if (!sessionState?.ttsFlowPaused) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeoutId);
+      sessionState.ttsResumeWaiters.delete(onResume);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    };
+
+    const onResume = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onAbort = () => {
+      cleanup();
+      reject(createAbortError());
+    };
+
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(createTtsBackpressureTimeoutError(timeoutMs));
+    }, timeoutMs);
+
+    sessionState.ttsResumeWaiters.add(onResume);
+
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) {
+        onAbort();
+      }
+    }
+  });
+}
+
+function startTtsAckWatchdog(sessionState, timeoutMs) {
+  clearTtsAckWatchdog(sessionState);
+  sessionState.ttsAckWatchdog = setInterval(() => {
+    if (!sessionState?.ttsStartedAt || !sessionState?.ttsController) {
+      return;
+    }
+
+    const now = Date.now();
+    const lastAckAt = sessionState.ttsLastAckAt || sessionState.ttsStartedAt;
+    if (now - lastAckAt <= timeoutMs) {
+      return;
+    }
+
+    sessionState.ttsAbortReason = 'backpressure_timeout';
+    sessionState.ttsStopNotified = false;
+    setTtsFlowPaused(sessionState, false);
+    sessionState.ttsController.abort();
+  }, TTS_ACK_WATCHDOG_INTERVAL_MS);
+  sessionState.ttsAckWatchdog.unref?.();
+}
+
+function resetTtsRuntimeState(sessionState) {
+  clearTtsAckWatchdog(sessionState);
+  setTtsFlowPaused(sessionState, false);
+  resolveTtsResumeWaiters(sessionState);
+  sessionState.ttsController = null;
+  sessionState.ttsStartedAt = 0;
+  sessionState.ttsLastAckAt = 0;
+  sessionState.ttsLastChunkSeq = 0;
+  sessionState.ttsStopNotified = false;
+  sessionState.ttsAbortReason = '';
+}
+
 function registerVoiceSessionIpc({
   ipcMain,
   emitEvent,
@@ -58,6 +205,7 @@ function registerVoiceSessionIpc({
   createTtsServiceImpl = createTtsService,
   onAsrFinal,
   autoTtsOnAsrFinal = false,
+  ttsBackpressureTimeoutMs = DEFAULT_TTS_BACKPRESSURE_TIMEOUT_MS,
 }) {
   const sessionMap = new Map();
   const asrService = createAsrServiceImpl();
@@ -92,6 +240,11 @@ function registerVoiceSessionIpc({
     });
   };
 
+  const safeTtsBackpressureTimeoutMs = normalizePositiveInteger(
+    ttsBackpressureTimeoutMs,
+    DEFAULT_TTS_BACKPRESSURE_TIMEOUT_MS,
+  );
+
   const buildSessionState = (sessionId, mode) => ({
     sessionId,
     mode: mode || 'vad',
@@ -102,6 +255,15 @@ function registerVoiceSessionIpc({
     audioChunks: [],
     asrController: null,
     ttsController: null,
+    ttsResumeWaiters: new Set(),
+    ttsFlowPaused: false,
+    ttsStartedAt: 0,
+    ttsLastAckAt: 0,
+    ttsLastChunkSeq: 0,
+    ttsAckWatchdog: null,
+    ttsBackpressureTimeoutMs: safeTtsBackpressureTimeoutMs,
+    ttsAbortReason: '',
+    ttsStopNotified: false,
   });
 
   ipcMain.handle('voice:session:start', async (_event, request = {}) => {
@@ -251,6 +413,7 @@ function registerVoiceSessionIpc({
           sendDone,
           sendError,
           sessionState,
+          ttsBackpressureTimeoutMs: safeTtsBackpressureTimeoutMs,
         });
       }
 
@@ -289,7 +452,11 @@ function registerVoiceSessionIpc({
     }
 
     sessionState.asrController?.abort();
+    sessionState.ttsAbortReason = 'session_stop';
+    sessionState.ttsStopNotified = true;
+    setTtsFlowPaused(sessionState, false);
     sessionState.ttsController?.abort();
+    clearTtsAckWatchdog(sessionState);
     sessionState.audioChunks = [];
     sessionState.status = SESSION_STATUS_IDLE;
     sendState(sessionId, sessionState.status);
@@ -309,7 +476,11 @@ function registerVoiceSessionIpc({
       };
     }
 
+    sessionState.ttsAbortReason = 'manual_stop';
+    sessionState.ttsStopNotified = true;
+    setTtsFlowPaused(sessionState, false);
     sessionState.ttsController?.abort();
+    clearTtsAckWatchdog(sessionState);
     sessionState.status = SESSION_STATUS_LISTENING;
     sendState(sessionId, sessionState.status);
     sendDone(sessionId, 'speaking', { aborted: true });
@@ -331,16 +502,25 @@ function registerVoiceSessionIpc({
     const bufferedMs = normalizeSeq(request.bufferedMs);
     sessionState.lastAckSeq = Math.max(sessionState.lastAckSeq, ackSeq);
     sessionState.bufferedMs = bufferedMs;
+    sessionState.ttsLastAckAt = Date.now();
+
+    const shouldPause = bufferedMs > TTS_PAUSE_HIGH_WATERMARK_MS;
+    const shouldResume = bufferedMs < TTS_RESUME_LOW_WATERMARK_MS;
+    if (shouldPause) {
+      setTtsFlowPaused(sessionState, true);
+    } else if (shouldResume) {
+      setTtsFlowPaused(sessionState, false);
+    }
 
     if (typeof emitFlowControl === 'function') {
-      if (bufferedMs > 2000) {
+      if (shouldPause) {
         emitFlowControl({
           type: 'tts-flow-control',
           sessionId,
           action: 'pause',
           bufferedMs,
         });
-      } else if (bufferedMs < 800) {
+      } else if (shouldResume) {
         emitFlowControl({
           type: 'tts-flow-control',
           sessionId,
@@ -361,7 +541,11 @@ function registerVoiceSessionIpc({
   return () => {
     for (const [, sessionState] of sessionMap.entries()) {
       sessionState.asrController?.abort();
+      sessionState.ttsAbortReason = 'session_stop';
+      sessionState.ttsStopNotified = true;
+      setTtsFlowPaused(sessionState, false);
       sessionState.ttsController?.abort();
+      clearTtsAckWatchdog(sessionState);
     }
     sessionMap.clear();
 
@@ -382,7 +566,9 @@ async function synthesizeTts({
   sendDone,
   sendError,
   sessionState,
+  ttsBackpressureTimeoutMs = DEFAULT_TTS_BACKPRESSURE_TIMEOUT_MS,
 }) {
+  resetTtsRuntimeState(sessionState);
   sessionState.status = SESSION_STATUS_SPEAKING;
   sendEvent({
     type: 'state',
@@ -390,14 +576,36 @@ async function synthesizeTts({
     status: sessionState.status,
   });
 
+  const timeoutMs = normalizePositiveInteger(
+    ttsBackpressureTimeoutMs || sessionState.ttsBackpressureTimeoutMs,
+    DEFAULT_TTS_BACKPRESSURE_TIMEOUT_MS,
+  );
+  sessionState.ttsBackpressureTimeoutMs = timeoutMs;
   sessionState.ttsController = new AbortController();
   let seq = 0;
   try {
     await ttsService.synthesize({
       text,
       signal: sessionState.ttsController.signal,
-      onChunk: ({ audioChunk, codec, sampleRate }) => {
+      onChunk: async ({ audioChunk, codec, sampleRate }) => {
+        await waitForTtsResume({
+          sessionState,
+          signal: sessionState.ttsController.signal,
+          timeoutMs,
+        });
+
+        if (sessionState.ttsAbortReason === 'backpressure_timeout') {
+          throw createTtsBackpressureTimeoutError(timeoutMs);
+        }
+
         seq += 1;
+        sessionState.ttsLastChunkSeq = seq;
+        if (seq === 1) {
+          sessionState.ttsStartedAt = Date.now();
+          sessionState.ttsLastAckAt = 0;
+          startTtsAckWatchdog(sessionState, timeoutMs);
+        }
+
         sendEvent({
           type: 'tts-chunk',
           sessionId,
@@ -410,6 +618,7 @@ async function synthesizeTts({
       },
     });
 
+    clearTtsAckWatchdog(sessionState);
     sendDone(sessionId, 'speaking');
     sessionState.status = SESSION_STATUS_LISTENING;
     sendEvent({
@@ -418,7 +627,39 @@ async function synthesizeTts({
       status: sessionState.status,
     });
   } catch (error) {
-    const payload = toVoiceError(error, 'voice_tts_failed', 'speaking');
+    clearTtsAckWatchdog(sessionState);
+
+    const abortReason = sessionState.ttsAbortReason;
+    const isAbort = error?.name === 'AbortError';
+    const isManualAbort =
+      isAbort && (abortReason === 'manual_stop' || abortReason === 'session_stop');
+
+    if (isManualAbort) {
+      if (!sessionState.ttsStopNotified && abortReason === 'manual_stop') {
+        sendDone(sessionId, 'speaking', { aborted: true });
+      }
+      if (abortReason === 'manual_stop' && sessionState.status !== SESSION_STATUS_IDLE) {
+        sessionState.status = SESSION_STATUS_LISTENING;
+        sendEvent({
+          type: 'state',
+          sessionId,
+          status: sessionState.status,
+        });
+      }
+      resetTtsRuntimeState(sessionState);
+      return;
+    }
+
+    const payload =
+      abortReason === 'backpressure_timeout' || error?.code === 'voice_tts_backpressure_timeout'
+        ? {
+            code: 'voice_tts_backpressure_timeout',
+            message: `No playback ACK received for ${timeoutMs}ms.`,
+            stage: 'speaking',
+            retriable: true,
+          }
+        : toVoiceError(error, 'voice_tts_failed', 'speaking');
+
     sendError(sessionId, payload);
     sessionState.status = SESSION_STATUS_ERROR;
     sendEvent({
@@ -426,6 +667,8 @@ async function synthesizeTts({
       sessionId,
       status: sessionState.status,
     });
+  } finally {
+    resetTtsRuntimeState(sessionState);
   }
 }
 
