@@ -53,6 +53,7 @@ function AppContent({ desktopMode }) {
 
   const {
     chatBackendSettings,
+    settingsDirty,
     settingsSaving,
     settingsTesting,
     settingsFeedback,
@@ -266,6 +267,7 @@ function AppContent({ desktopMode }) {
         onMotionsUpdate={setMotions}
         onExpressionsUpdate={setExpressions}
         chatBackendSettings={chatBackendSettings}
+        settingsDirty={settingsDirty}
         settingsSaving={settingsSaving}
         settingsTesting={settingsTesting}
         settingsFeedback={settingsFeedback}

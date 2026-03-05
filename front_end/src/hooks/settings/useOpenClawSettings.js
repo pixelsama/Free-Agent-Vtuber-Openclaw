@@ -34,6 +34,33 @@ const defaultNanobotRuntimeStatus = {
   installing: false,
 };
 
+function buildComparableSettingsSnapshot(settings = {}) {
+  const normalized = normalizeSettingsForState(settings);
+  return {
+    chatBackend: normalized.chatBackend === 'nanobot' ? 'nanobot' : 'openclaw',
+    openclaw: {
+      baseUrl: normalized.openclaw?.baseUrl || '',
+      agentId: normalized.openclaw?.agentId || '',
+    },
+    nanobot: {
+      enabled: Boolean(normalized.nanobot?.enabled),
+      workspace: normalized.nanobot?.workspace || '',
+      provider: normalized.nanobot?.provider || '',
+      model: normalized.nanobot?.model || '',
+      apiBase: normalized.nanobot?.apiBase || '',
+      maxTokens: Number.isFinite(normalized.nanobot?.maxTokens) ? normalized.nanobot.maxTokens : 4096,
+      temperature: Number.isFinite(normalized.nanobot?.temperature) ? normalized.nanobot.temperature : 0.2,
+      reasoningEffort: normalized.nanobot?.reasoningEffort || '',
+    },
+  };
+}
+
+function hasPendingSecretChanges(settings = {}) {
+  const openclawToken = typeof settings?.openclaw?.token === 'string' ? settings.openclaw.token.trim() : '';
+  const nanobotApiKey = typeof settings?.nanobot?.apiKey === 'string' ? settings.nanobot.apiKey.trim() : '';
+  return Boolean(openclawToken || nanobotApiKey);
+}
+
 function normalizeSettingsForState(settings = {}) {
   const openclaw = settings?.openclaw || {};
   const nanobot = settings?.nanobot || {};
@@ -129,6 +156,9 @@ export function formatOpenClawSettingsError({ error, normalizeError, t }) {
 
 export function useChatBackendSettings({ t, normalizeError }) {
   const [chatBackendSettings, setChatBackendSettings] = useState(defaultChatBackendSettings);
+  const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState(
+    buildComparableSettingsSnapshot(defaultChatBackendSettings),
+  );
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsTesting, setSettingsTesting] = useState(false);
   const [settingsFeedback, setSettingsFeedback] = useState('');
@@ -163,7 +193,9 @@ export function useChatBackendSettings({ t, normalizeError }) {
         if (!mounted) {
           return;
         }
-        setChatBackendSettings(normalizeSettingsForState(settings));
+        const normalized = normalizeSettingsForState(settings);
+        setChatBackendSettings(normalized);
+        setSavedSettingsSnapshot(buildComparableSettingsSnapshot(normalized));
       } catch (error) {
         console.error('Failed to load chat backend settings:', error);
       }
@@ -218,17 +250,9 @@ export function useChatBackendSettings({ t, normalizeError }) {
     try {
       const payload = buildChatBackendSettingsPayload(chatBackendSettings);
       const saved = await desktopBridge.settings.save(payload);
-      setChatBackendSettings((prev) => ({
-        ...normalizeSettingsForState(saved),
-        openclaw: {
-          ...normalizeSettingsForState(saved).openclaw,
-          token: prev.openclaw.token,
-        },
-        nanobot: {
-          ...normalizeSettingsForState(saved).nanobot,
-          apiKey: prev.nanobot.apiKey,
-        },
-      }));
+      const normalizedSaved = normalizeSettingsForState(saved);
+      setChatBackendSettings(normalizedSaved);
+      setSavedSettingsSnapshot(buildComparableSettingsSnapshot(normalizedSaved));
       setSettingsFeedback(t('app.settingsSaved'));
     } catch (error) {
       console.error('Save chat backend settings failed:', error);
@@ -249,8 +273,12 @@ export function useChatBackendSettings({ t, normalizeError }) {
       if (!result?.ok) {
         setSettingsError(formatError(result?.error));
       } else {
+        const saved = await desktopBridge.settings.save(payload);
+        const normalizedSaved = normalizeSettingsForState(saved);
+        setChatBackendSettings(normalizedSaved);
+        setSavedSettingsSnapshot(buildComparableSettingsSnapshot(normalizedSaved));
         const latency = typeof result.latencyMs === 'number' ? t('app.latency', { latency: result.latencyMs }) : '';
-        setSettingsFeedback(t('app.settingsConnected', { latency }));
+        setSettingsFeedback(t('app.settingsConnectedAutoSaved', { latency }));
       }
     } catch (error) {
       console.error('Test chat backend settings failed:', error);
@@ -292,6 +320,7 @@ export function useChatBackendSettings({ t, normalizeError }) {
           apiKey: '',
         },
       });
+      setSavedSettingsSnapshot(buildComparableSettingsSnapshot(normalizedSaved));
       setSettingsFeedback(t('app.tokenCleared'));
     } catch (error) {
       console.error('Clear token failed:', error);
@@ -329,9 +358,16 @@ export function useChatBackendSettings({ t, normalizeError }) {
     [chatBackendSettings],
   );
 
+  const settingsDirty = useMemo(() => {
+    const currentSnapshot = buildComparableSettingsSnapshot(chatBackendSettings);
+    const snapshotChanged = JSON.stringify(currentSnapshot) !== JSON.stringify(savedSettingsSnapshot);
+    return snapshotChanged || hasPendingSecretChanges(chatBackendSettings);
+  }, [chatBackendSettings, savedSettingsSnapshot]);
+
   return {
     chatBackendSettings,
     openClawSettings,
+    settingsDirty,
     settingsSaving,
     settingsTesting,
     settingsFeedback,
