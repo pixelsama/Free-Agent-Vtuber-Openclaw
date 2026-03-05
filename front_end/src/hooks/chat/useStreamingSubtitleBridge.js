@@ -4,25 +4,8 @@ const SEGMENT_READY_FALLBACK_DELAY_MS = 350;
 const TTS_STARTED_BUFFER_TTL_MS = 10000;
 const DEFAULT_TTS_FINISH_HOLD_MS = 280;
 const DEFAULT_TTS_FAILED_HOLD_MS = 1200;
-
-function parseDelayFromEnv(key, fallback) {
-  const raw = import.meta?.env?.[key];
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return fallback;
-  }
-
-  return Math.min(parsed, 20000);
-}
-
-const TTS_FINISH_HOLD_MS = parseDelayFromEnv(
-  'VITE_SUBTITLE_TTS_FINISH_HOLD_MS',
-  DEFAULT_TTS_FINISH_HOLD_MS,
-);
-const TTS_FAILED_HOLD_MS = parseDelayFromEnv(
-  'VITE_SUBTITLE_TTS_FAILED_HOLD_MS',
-  DEFAULT_TTS_FAILED_HOLD_MS,
-);
+const TTS_FINISH_HOLD_MS = DEFAULT_TTS_FINISH_HOLD_MS;
+const TTS_FAILED_HOLD_MS = DEFAULT_TTS_FAILED_HOLD_MS;
 
 function normalizeSegmentId(segment = {}) {
   if (typeof segment.segmentId === 'string' && segment.segmentId.trim()) {
