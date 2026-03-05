@@ -128,6 +128,12 @@ const voice = {
   sendPlaybackAck(request) {
     return ipcRenderer.invoke('voice:playback:ack', request);
   },
+  runAsrDiagnostics(request) {
+    return ipcRenderer.invoke('voice:diagnostics:asr', request);
+  },
+  runTtsDiagnostics(request) {
+    return ipcRenderer.invoke('voice:diagnostics:tts', request);
+  },
   listSegmentTrace(request) {
     return ipcRenderer.invoke('voice:segment:trace:list', request);
   },

@@ -123,6 +123,15 @@ function cloneBinaryChunk(value) {
   return new Uint8Array(0);
 }
 
+function toBufferChunk(value) {
+  const chunk = cloneBinaryChunk(value);
+  if (!chunk.length) {
+    return Buffer.alloc(0);
+  }
+
+  return Buffer.from(chunk);
+}
+
 function toSafeVoiceEvent(event) {
   if (!event || typeof event !== 'object') {
     return event;
@@ -1280,6 +1289,166 @@ function registerVoiceSessionIpc({
     };
   });
 
+  ipcMain.handle('voice:diagnostics:asr', async (_event, request = {}) => {
+    const pcmChunk = toBufferChunk(request.pcmChunk);
+    if (!pcmChunk.length) {
+      return {
+        ok: false,
+        error: {
+          code: 'voice_asr_test_empty_audio',
+          message: 'ASR test requires non-empty audio input.',
+          stage: 'transcribing',
+          retriable: false,
+        },
+      };
+    }
+
+    const sampleRate = normalizeSeq(request.sampleRate) || 16000;
+    const channels = normalizeSeq(request.channels) || 1;
+    const sampleFormat =
+      typeof request.sampleFormat === 'string' && request.sampleFormat.trim()
+        ? request.sampleFormat.trim()
+        : 'pcm_s16le';
+    const timeoutMs = normalizePositiveInteger(request.timeoutMs, 120000);
+
+    const runtime = resolveRuntime();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+    timeoutId.unref?.();
+
+    let partialCount = 0;
+    const startedAt = Date.now();
+    try {
+      const result = await runtime.asrService.transcribe({
+        audioChunks: [
+          {
+            seq: 1,
+            chunkId: 1,
+            sampleRate,
+            channels,
+            sampleFormat,
+            isSpeech: true,
+            pcmChunk,
+          },
+        ],
+        signal: controller.signal,
+        onPartial: () => {
+          partialCount += 1;
+        },
+      });
+
+      const text = typeof result?.text === 'string' ? result.text.trim() : '';
+      return {
+        ok: true,
+        text,
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        partialCount,
+        sampleRate,
+        sampleFormat,
+        audioBytes: pcmChunk.length,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: toVoiceError(error, 'voice_asr_test_failed', 'transcribing'),
+        latencyMs: Math.max(0, Date.now() - startedAt),
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  });
+
+  ipcMain.handle('voice:diagnostics:tts', async (_event, request = {}) => {
+    const text = normalizeSegmentText(request.text);
+    if (!text) {
+      return {
+        ok: false,
+        error: {
+          code: 'voice_tts_test_text_required',
+          message: 'TTS test text is required.',
+          stage: 'speaking',
+          retriable: false,
+        },
+      };
+    }
+
+    const timeoutMs = normalizePositiveInteger(request.timeoutMs, 180000);
+    const runtime = resolveRuntime();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+    timeoutId.unref?.();
+
+    let firstChunkAt = 0;
+    let chunkCount = 0;
+    let totalBytes = 0;
+    let observedSampleRate = 0;
+    const includeAudio = Boolean(request.includeAudio);
+    const collectedAudioChunks = [];
+
+    const startedAt = Date.now();
+    try {
+      const result = await runtime.ttsService.synthesize({
+        text,
+        signal: controller.signal,
+        onChunk: async ({ audioChunk, sampleRate }) => {
+          const chunk = cloneBinaryChunk(audioChunk);
+          if (!chunk.length) {
+            return;
+          }
+
+          chunkCount += 1;
+          totalBytes += chunk.byteLength;
+          if (includeAudio) {
+            collectedAudioChunks.push(Buffer.from(chunk));
+          }
+          if (!firstChunkAt) {
+            firstChunkAt = Date.now();
+          }
+
+          if (!observedSampleRate && Number.isFinite(sampleRate) && sampleRate > 0) {
+            observedSampleRate = Math.floor(sampleRate);
+          }
+        },
+      });
+
+      const resultSampleRate = Number.isFinite(result?.sampleRate) ? Math.floor(result.sampleRate) : 0;
+      const resultSampleCount = Number.isFinite(result?.sampleCount) ? Math.floor(result.sampleCount) : 0;
+      const outputDurationMs =
+        resultSampleRate > 0 && resultSampleCount > 0
+          ? Math.max(0, Math.round((resultSampleCount / resultSampleRate) * 1000))
+          : 0;
+      const pcmS16LeBase64 =
+        includeAudio && collectedAudioChunks.length > 0
+          ? Buffer.concat(collectedAudioChunks).toString('base64')
+          : '';
+      return {
+        ok: true,
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        firstChunkLatencyMs: firstChunkAt ? Math.max(0, firstChunkAt - startedAt) : null,
+        chunkCount,
+        totalBytes,
+        sampleRate: observedSampleRate || resultSampleRate || undefined,
+        sampleCount: resultSampleCount || undefined,
+        outputDurationMs: outputDurationMs || undefined,
+        textLength: text.length,
+        pcmS16LeBase64: pcmS16LeBase64 || undefined,
+        codec: pcmS16LeBase64 ? 'pcm_s16le' : undefined,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: toVoiceError(error, 'voice_tts_test_failed', 'speaking'),
+        latencyMs: Math.max(0, Date.now() - startedAt),
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  });
+
   ipcMain.handle('voice:segment:trace:list', async (_event, request = {}) => ({
     ok: true,
     items: listSegmentTraceItems({
@@ -1319,6 +1488,8 @@ function registerVoiceSessionIpc({
     ipcMain.removeHandler('voice:session:stop');
     ipcMain.removeHandler('voice:tts:stop');
     ipcMain.removeHandler('voice:playback:ack');
+    ipcMain.removeHandler('voice:diagnostics:asr');
+    ipcMain.removeHandler('voice:diagnostics:tts');
     ipcMain.removeHandler('voice:segment:trace:list');
   };
 

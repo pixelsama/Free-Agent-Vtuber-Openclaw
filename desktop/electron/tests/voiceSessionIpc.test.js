@@ -687,3 +687,84 @@ test('voice segment trace list returns lifecycle timing for latest segments', as
   assert.equal(trace.startedAt >= trace.readyAt, true);
   assert.equal(trace.finishedAt >= trace.startedAt, true);
 });
+
+test('voice diagnostics asr returns latency and transcript', async () => {
+  const ipcMain = createIpcMainMock();
+  let receivedAudioBytes = 0;
+
+  registerVoiceSessionIpc({
+    ipcMain,
+    emitEvent: () => {},
+    createAsrServiceImpl: () => ({
+      transcribe: async ({ audioChunks, onPartial }) => {
+        receivedAudioBytes = audioChunks[0]?.pcmChunk?.length || 0;
+        onPartial?.('diag-partial');
+        return { text: 'diag-final' };
+      },
+    }),
+  });
+
+  const result = await ipcMain.invoke('voice:diagnostics:asr', {
+    pcmChunk: Buffer.from([1, 2, 3, 4]),
+    sampleRate: 16000,
+    channels: 1,
+    sampleFormat: 'pcm_s16le',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.text, 'diag-final');
+  assert.equal(result.partialCount, 1);
+  assert.equal(result.sampleRate, 16000);
+  assert.equal(result.sampleFormat, 'pcm_s16le');
+  assert.equal(result.audioBytes, 4);
+  assert.equal(receivedAudioBytes, 4);
+  assert.equal(typeof result.latencyMs, 'number');
+  assert.equal(result.latencyMs >= 0, true);
+});
+
+test('voice diagnostics tts returns first-chunk and total latency', async () => {
+  const ipcMain = createIpcMainMock();
+
+  registerVoiceSessionIpc({
+    ipcMain,
+    emitEvent: () => {},
+    createTtsServiceImpl: () => ({
+      synthesize: async ({ onChunk }) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await onChunk({
+          audioChunk: Buffer.from([1, 2, 3, 4]),
+          codec: 'pcm_s16le',
+          sampleRate: 24000,
+        });
+        await onChunk({
+          audioChunk: Buffer.from([5, 6, 7, 8, 9, 10]),
+          codec: 'pcm_s16le',
+          sampleRate: 24000,
+        });
+        return {
+          sampleRate: 24000,
+          sampleCount: 480,
+        };
+      },
+    }),
+  });
+
+  const result = await ipcMain.invoke('voice:diagnostics:tts', {
+    text: 'hello',
+    includeAudio: true,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(typeof result.firstChunkLatencyMs, 'number');
+  assert.equal(result.firstChunkLatencyMs >= 0, true);
+  assert.equal(typeof result.latencyMs, 'number');
+  assert.equal(result.latencyMs >= result.firstChunkLatencyMs, true);
+  assert.equal(result.chunkCount, 2);
+  assert.equal(result.totalBytes, 10);
+  assert.equal(result.sampleRate, 24000);
+  assert.equal(result.sampleCount, 480);
+  assert.equal(result.outputDurationMs > 0, true);
+  assert.equal(typeof result.pcmS16LeBase64, 'string');
+  assert.equal(result.pcmS16LeBase64.length > 0, true);
+  assert.equal(result.codec, 'pcm_s16le');
+});

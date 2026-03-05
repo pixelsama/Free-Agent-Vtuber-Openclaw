@@ -30,6 +30,11 @@
   -webkit-app-region: no-drag;
 }
 
+.edge-composer-pet {
+  flex-direction: column;
+  gap: 8px;
+}
+
 .edge-composer-toggle {
   background: var(--floating-button-bg, rgba(255, 255, 255, 0.85)) !important;
 }
