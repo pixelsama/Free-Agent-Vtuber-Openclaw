@@ -64,7 +64,6 @@ export default function ConfigDrawer({
   onMotionsUpdate,
   onExpressionsUpdate,
   chatBackendSettings = {},
-  settingsDirty = false,
   settingsSaving = false,
   settingsTesting = false,
   settingsFeedback = '',
@@ -72,7 +71,6 @@ export default function ConfigDrawer({
   onChatBackendChange,
   onOpenClawSettingChange,
   onNanobotSettingChange,
-  onSaveChatBackendSettings,
   onTestChatBackendSettings,
   onClearSavedToken,
   nanobotRuntimeStatus = {},
@@ -97,7 +95,6 @@ export default function ConfigDrawer({
   const testButtonDisabled = settingsSaving
     || settingsTesting
     || (selectedBackend === 'nanobot' && !nanobotSettings.enabled);
-  const saveButtonDisabled = settingsSaving || settingsTesting || !settingsDirty;
 
   useEffect(() => {
     if (!open) {
@@ -362,13 +359,6 @@ export default function ConfigDrawer({
                 )}
 
                 <Stack direction="row" spacing={1}>
-                  <Button
-                    variant="contained"
-                    onClick={onSaveChatBackendSettings}
-                    disabled={saveButtonDisabled}
-                  >
-                    {settingsSaving ? t('app.savingSettings') : t('app.saveSettings')}
-                  </Button>
                   <Button
                     variant="outlined"
                     onClick={onTestChatBackendSettings}

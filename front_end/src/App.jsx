@@ -53,7 +53,6 @@ function AppContent({ desktopMode }) {
 
   const {
     chatBackendSettings,
-    settingsDirty,
     settingsSaving,
     settingsTesting,
     settingsFeedback,
@@ -61,7 +60,6 @@ function AppContent({ desktopMode }) {
     onChatBackendChange,
     onOpenClawSettingChange,
     onNanobotSettingChange,
-    onSaveChatBackendSettings,
     onTestChatBackendSettings,
     onClearSavedToken,
     nanobotRuntimeStatus,
@@ -267,7 +265,6 @@ function AppContent({ desktopMode }) {
         onMotionsUpdate={setMotions}
         onExpressionsUpdate={setExpressions}
         chatBackendSettings={chatBackendSettings}
-        settingsDirty={settingsDirty}
         settingsSaving={settingsSaving}
         settingsTesting={settingsTesting}
         settingsFeedback={settingsFeedback}
@@ -275,7 +272,6 @@ function AppContent({ desktopMode }) {
         onChatBackendChange={onChatBackendChange}
         onOpenClawSettingChange={onOpenClawSettingChange}
         onNanobotSettingChange={onNanobotSettingChange}
-        onSaveChatBackendSettings={onSaveChatBackendSettings}
         onTestChatBackendSettings={onTestChatBackendSettings}
         onClearSavedToken={onClearSavedToken}
         nanobotRuntimeStatus={nanobotRuntimeStatus}

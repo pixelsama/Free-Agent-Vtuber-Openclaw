@@ -33,6 +33,7 @@ const defaultNanobotRuntimeStatus = {
   managedByApp: false,
   installing: false,
 };
+const SETTINGS_AUTOSAVE_DEBOUNCE_MS = 500;
 
 function buildComparableSettingsSnapshot(settings = {}) {
   const normalized = normalizeSettingsForState(settings);
@@ -159,6 +160,7 @@ export function useChatBackendSettings({ t, normalizeError }) {
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState(
     buildComparableSettingsSnapshot(defaultChatBackendSettings),
   );
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsTesting, setSettingsTesting] = useState(false);
   const [settingsFeedback, setSettingsFeedback] = useState('');
@@ -196,8 +198,10 @@ export function useChatBackendSettings({ t, normalizeError }) {
         const normalized = normalizeSettingsForState(settings);
         setChatBackendSettings(normalized);
         setSavedSettingsSnapshot(buildComparableSettingsSnapshot(normalized));
+        setSettingsLoaded(true);
       } catch (error) {
         console.error('Failed to load chat backend settings:', error);
+        setSettingsLoaded(true);
       }
     };
 
@@ -208,6 +212,42 @@ export function useChatBackendSettings({ t, normalizeError }) {
       mounted = false;
     };
   }, [refreshNanobotRuntimeStatus]);
+
+  useEffect(() => {
+    if (!settingsLoaded) {
+      return () => {};
+    }
+
+    const currentSnapshot = buildComparableSettingsSnapshot(chatBackendSettings);
+    const snapshotChanged = JSON.stringify(currentSnapshot) !== JSON.stringify(savedSettingsSnapshot);
+    const pendingSecrets = hasPendingSecretChanges(chatBackendSettings);
+    if (!snapshotChanged && !pendingSecrets) {
+      return () => {};
+    }
+
+    const timer = setTimeout(() => {
+      void (async () => {
+        setSettingsSaving(true);
+        setSettingsError('');
+        try {
+          const payload = buildChatBackendSettingsPayload(chatBackendSettings);
+          const saved = await desktopBridge.settings.save(payload);
+          const normalizedSaved = normalizeSettingsForState(saved);
+          setChatBackendSettings(normalizedSaved);
+          setSavedSettingsSnapshot(buildComparableSettingsSnapshot(normalizedSaved));
+        } catch (error) {
+          console.error('Auto-save chat backend settings failed:', error);
+          setSettingsError(formatError(error));
+        } finally {
+          setSettingsSaving(false);
+        }
+      })();
+    }, SETTINGS_AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [chatBackendSettings, formatError, savedSettingsSnapshot, settingsLoaded]);
 
   const onChatBackendChange = useCallback((backend) => {
     setChatBackendSettings((prev) => ({
@@ -241,26 +281,6 @@ export function useChatBackendSettings({ t, normalizeError }) {
     setSettingsFeedback('');
     setSettingsError('');
   }, []);
-
-  const onSaveChatBackendSettings = useCallback(async () => {
-    setSettingsSaving(true);
-    setSettingsError('');
-    setSettingsFeedback('');
-
-    try {
-      const payload = buildChatBackendSettingsPayload(chatBackendSettings);
-      const saved = await desktopBridge.settings.save(payload);
-      const normalizedSaved = normalizeSettingsForState(saved);
-      setChatBackendSettings(normalizedSaved);
-      setSavedSettingsSnapshot(buildComparableSettingsSnapshot(normalizedSaved));
-      setSettingsFeedback(t('app.settingsSaved'));
-    } catch (error) {
-      console.error('Save chat backend settings failed:', error);
-      setSettingsError(formatError(error));
-    } finally {
-      setSettingsSaving(false);
-    }
-  }, [chatBackendSettings, formatError, t]);
 
   const onTestChatBackendSettings = useCallback(async () => {
     setSettingsTesting(true);
@@ -358,16 +378,9 @@ export function useChatBackendSettings({ t, normalizeError }) {
     [chatBackendSettings],
   );
 
-  const settingsDirty = useMemo(() => {
-    const currentSnapshot = buildComparableSettingsSnapshot(chatBackendSettings);
-    const snapshotChanged = JSON.stringify(currentSnapshot) !== JSON.stringify(savedSettingsSnapshot);
-    return snapshotChanged || hasPendingSecretChanges(chatBackendSettings);
-  }, [chatBackendSettings, savedSettingsSnapshot]);
-
   return {
     chatBackendSettings,
     openClawSettings,
-    settingsDirty,
     settingsSaving,
     settingsTesting,
     settingsFeedback,
@@ -375,9 +388,7 @@ export function useChatBackendSettings({ t, normalizeError }) {
     onChatBackendChange,
     onOpenClawSettingChange,
     onNanobotSettingChange,
-    onSaveChatBackendSettings,
     onTestChatBackendSettings,
-    onSaveOpenClawSettings: onSaveChatBackendSettings,
     onTestOpenClawSettings: onTestChatBackendSettings,
     onClearSavedToken,
     nanobotRuntimeStatus,
