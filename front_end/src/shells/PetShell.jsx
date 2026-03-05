@@ -205,6 +205,7 @@ export default function PetShell({
           onModelError={onModelError}
           className="live2d-viewer"
         />
+        <SubtitleBar text={subtitleText} className="subtitle-pet-head" />
         <Box
           ref={controlsRef}
           className={`pet-hitbox-controls ${controlsVisible ? 'is-visible' : ''}`.trim()}
@@ -250,8 +251,6 @@ export default function PetShell({
           />
         </Box>
       </Box>
-
-      <SubtitleBar text={subtitleText} />
     </Box>
   );
 }

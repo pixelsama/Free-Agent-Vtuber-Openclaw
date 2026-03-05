@@ -101,10 +101,6 @@ body,
   pointer-events: auto;
 }
 
-.live2d-stage.pet-mode .subtitle-container {
-  bottom: 20px;
-}
-
 .live2d-stage.window-mode .live2d-hitbox {
   top: 44px;
   height: calc(100% - 44px);

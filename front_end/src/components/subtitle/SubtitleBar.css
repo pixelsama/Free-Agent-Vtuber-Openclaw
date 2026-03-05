@@ -13,6 +13,7 @@
   backdrop-filter: none;
   box-shadow: none;
   transition: opacity 0.25s ease, transform 0.25s ease;
+  z-index: 6;
 }
 
 .subtitle-container.hidden {
@@ -33,4 +34,10 @@
   text-shadow:
     0 2px 8px rgba(0, 0, 0, 0.8),
     0 0 2px rgba(0, 0, 0, 0.9);
+}
+
+.subtitle-container.subtitle-pet-head {
+  top: clamp(8px, 2.2vh, 20px);
+  bottom: auto;
+  width: min(340px, calc(100% - 20px));
 }

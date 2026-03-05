@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import './SubtitleBar.css';
 
-export default function SubtitleBar({ text = '', autoHideDelay = 5000 }) {
+export default function SubtitleBar({ text = '', autoHideDelay = 5000, className = '' }) {
   const [visible, setVisible] = useState(false);
   const hideTimerRef = useRef(null);
   const normalizedText = typeof text === 'string' ? text.trim() : '';
@@ -30,7 +30,7 @@ export default function SubtitleBar({ text = '', autoHideDelay = 5000 }) {
   }, [normalizedText, autoHideDelay]);
 
   return (
-    <div className={`subtitle-container ${visible ? 'visible' : 'hidden'}`}>
+    <div className={`subtitle-container ${className} ${visible ? 'visible' : 'hidden'}`.trim()}>
       <span className="subtitle-text">{normalizedText}</span>
     </div>
   );
