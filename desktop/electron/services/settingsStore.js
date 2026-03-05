@@ -399,10 +399,13 @@ class SettingsStore {
     }
 
     if (isObject(patch.nanobot)) {
+      const existingNanobotApiKey =
+        typeof merged.nanobot?.apiKey === 'string' ? merged.nanobot.apiKey : '';
       merged.nanobot = normalizeNanobotSettings({
         ...merged.nanobot,
         ...patch.nanobot,
       });
+      merged.nanobot.apiKey = existingNanobotApiKey;
     }
 
     if (patch.clearOpenclawToken) {

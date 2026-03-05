@@ -275,6 +275,16 @@ test('merge applies backend-specific override payload', async () => {
   assert.equal(merged.nanobot.enabled, true);
   assert.equal(merged.nanobot.model, 'openai/gpt-4.1');
   assert.equal(merged.nanobot.apiKey, 'override-nanobot-api-key');
+
+  const mergedWithoutApiKeyOverride = store.merge({
+    chatBackend: 'nanobot',
+    nanobot: {
+      enabled: true,
+      provider: 'openrouter',
+      model: 'openai/gpt-4.1',
+    },
+  });
+  assert.equal(mergedWithoutApiKeyOverride.nanobot.apiKey, 'saved-nanobot-api-key');
 });
 
 test('falls back when secure storage throws at runtime', async () => {
