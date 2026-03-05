@@ -497,6 +497,13 @@ export const desktopBridge = {
         },
       };
     },
+    onProgress(handler) {
+      const api = getDesktopApi();
+      if (!api?.nanobotRuntime?.onProgress || typeof handler !== 'function') {
+        return () => {};
+      }
+      return api.nanobotRuntime.onProgress(handler);
+    },
   },
   mode: {
     async getCurrent() {

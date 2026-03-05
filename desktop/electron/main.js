@@ -288,6 +288,12 @@ async function bootstrap() {
   disposeNanobotRuntimeHandlers = registerNanobotRuntimeIpc({
     ipcMain,
     nanobotRuntimeManager,
+    emitProgress: (payload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+      mainWindow.webContents.send('nanobot-runtime:progress', payload);
+    },
   });
   disposeVoiceModelsHandlers = registerVoiceModelsIpc({
     ipcMain,

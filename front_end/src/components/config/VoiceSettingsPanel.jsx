@@ -4,16 +4,9 @@ import {
   Box,
   Button,
   Chip,
-  Collapse,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  LinearProgress,
   MenuItem,
   Stack,
   TextField,
-  Typography,
 } from '@mui/material';
 import { useI18n } from '../../i18n/I18nContext.jsx';
 import { useSileroVad } from '../../hooks/voice/useSileroVad.js';
@@ -62,58 +55,7 @@ function splitFloat32ToPcmChunks(audioFloat32, frameSamples = 320) {
   return chunks;
 }
 
-function formatBytes(value) {
-  const bytes = Number.isFinite(value) ? value : 0;
-  if (bytes <= 0) {
-    return '0 B';
-  }
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function formatBytesPerSecond(value) {
-  const bytesPerSecond = Number.isFinite(value) ? value : 0;
-  if (bytesPerSecond <= 0) {
-    return '0 B/s';
-  }
-  return `${formatBytes(bytesPerSecond)}/s`;
-}
-
-function formatEta(value) {
-  if (!Number.isFinite(value) || value < 0) {
-    return '--';
-  }
-
-  const totalSeconds = Math.max(0, Math.round(value));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${seconds}s`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-  return `${seconds}s`;
-}
-
-function formatLogTimestamp() {
-  const now = new Date();
-  return now.toLocaleTimeString('zh-CN', {
-    hour12: false,
-  });
-}
-
-export default function VoiceSettingsPanel({ desktopMode = false }) {
+export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownloadCenter }) {
   const { t } = useI18n();
   const seqRef = useRef(0);
   const chunkIdRef = useRef(0);
@@ -123,7 +65,6 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   const stopPlaybackRef = useRef(null);
   const stopVadRef = useRef(null);
   const stopSessionRef = useRef(null);
-  const downloadLogKeyRef = useRef('');
   const progressEstimatorRef = useRef({
     key: '',
     lastBytes: 0,
@@ -141,9 +82,6 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
   const [modelProgress, setModelProgress] = useState(null);
   const [modelFeedback, setModelFeedback] = useState('');
   const [modelError, setModelError] = useState('');
-  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
-  const [downloadDetailsOpen, setDownloadDetailsOpen] = useState(false);
-  const [modelInstallLogs, setModelInstallLogs] = useState([]);
 
   const {
     sessionId,
@@ -283,22 +221,6 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
     await loadVoiceModels();
   }, [loadVoiceModels]);
 
-  const appendModelInstallLog = useCallback((message, dedupeKey = '') => {
-    const text = typeof message === 'string' ? message.trim() : '';
-    if (!text) {
-      return;
-    }
-    if (dedupeKey && downloadLogKeyRef.current === dedupeKey) {
-      return;
-    }
-    if (dedupeKey) {
-      downloadLogKeyRef.current = dedupeKey;
-    }
-
-    const line = `[${formatLogTimestamp()}] ${text}`;
-    setModelInstallLogs((previous) => [...previous, line]);
-  }, []);
-
   const handleSelectBundle = useCallback(async () => {
     if (!desktopMode) {
       return;
@@ -335,11 +257,7 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
 
     setModelError('');
     setModelFeedback('');
-    setDownloadDialogOpen(true);
-    setDownloadDetailsOpen(false);
-    downloadLogKeyRef.current = '';
-    setModelInstallLogs([]);
-    appendModelInstallLog('开始下载并安装内置语音模型。');
+    onOpenDownloadCenter?.('voice-models');
     setModelProgress({
       phase: 'started',
       completedTasks: 0,
@@ -362,26 +280,23 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
       if (!result?.ok) {
         const message = result?.error?.message || '安装内置模型失败。';
         setModelError(message);
-        appendModelInstallLog(message);
         return;
       }
 
       setModelBundles(Array.isArray(result.bundles) ? result.bundles : []);
       setSelectedBundleId(typeof result.selectedBundleId === 'string' ? result.selectedBundleId : '');
       setModelFeedback('内置模型安装完成并已自动选中。');
-      appendModelInstallLog('内置模型安装完成并已自动选中。');
     } catch (error) {
       if (mountedRef.current) {
         const message = error?.message || '安装内置模型失败。';
         setModelError(message);
-        appendModelInstallLog(message);
       }
     } finally {
       if (mountedRef.current) {
         setIsDownloadingModels(false);
       }
     }
-  }, [appendModelInstallLog, desktopMode, selectedCatalogId]);
+  }, [desktopMode, onOpenDownloadCenter, selectedCatalogId]);
 
   const enqueueSpeechTask = useCallback((task) => {
     speechQueueRef.current = speechQueueRef.current
@@ -613,23 +528,8 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
         downloadSpeedBytesPerSec: speedBytesPerSec,
         estimatedRemainingSeconds,
       });
-
-      const dedupeKey = `${phase}|${currentFile}`;
-      if (currentFile) {
-        appendModelInstallLog(currentFile, dedupeKey);
-        return;
-      }
-      if (phase === 'started') {
-        appendModelInstallLog('准备下载...', dedupeKey);
-      } else if (phase === 'extracting') {
-        appendModelInstallLog('正在解压文件...', dedupeKey);
-      } else if (phase === 'completed') {
-        appendModelInstallLog('下载与安装流程已完成。', dedupeKey);
-      } else if (phase === 'failed') {
-        appendModelInstallLog('下载与安装流程失败。', dedupeKey);
-      }
     });
-  }, [appendModelInstallLog, desktopMode]);
+  }, [desktopMode]);
 
   useEffect(() => {
     return onEvent(handleVoiceEvent);
@@ -648,13 +548,6 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
       void stopSessionRef.current?.({ reason: 'panel_unmount' });
     };
   }, []);
-
-  const handleDownloadDialogClose = useCallback((_event, reason) => {
-    if (isDownloadingModels && (reason === 'backdropClick' || reason === 'escapeKeyDown')) {
-      return;
-    }
-    setDownloadDialogOpen(false);
-  }, [isDownloadingModels]);
 
   return (
     <Stack spacing={2}>
@@ -746,7 +639,7 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
           )}
 
           {!!modelProgress && (
-            <Button size="small" variant="outlined" onClick={() => setDownloadDialogOpen(true)}>
+            <Button size="small" variant="outlined" onClick={() => onOpenDownloadCenter?.('voice-models')}>
               查看下载进度窗口
             </Button>
           )}
@@ -832,62 +725,6 @@ export default function VoiceSettingsPanel({ desktopMode = false }) {
       {!!lastError && <Alert severity="error">{lastError}</Alert>}
       {!!vadError && <Alert severity="warning">{vadError}</Alert>}
       {!!playbackError && <Alert severity="warning">{playbackError}</Alert>}
-
-      <Dialog
-        open={downloadDialogOpen}
-        onClose={handleDownloadDialogClose}
-        fullWidth
-        maxWidth="sm"
-        disableEscapeKeyDown={isDownloadingModels}
-      >
-        <DialogTitle>语音模型下载与安装</DialogTitle>
-        <DialogContent>
-          <Stack spacing={1.5} sx={{ mt: 0.5 }}>
-            <Box sx={{ px: 0.5 }}>
-              <LinearProgress
-                variant={typeof modelProgress?.overallProgress === 'number' ? 'determinate' : 'indeterminate'}
-                value={typeof modelProgress?.overallProgress === 'number' ? modelProgress.overallProgress * 100 : 0}
-              />
-            </Box>
-            <Typography variant="body2" color="text.secondary" align="center">
-              {modelProgress?.currentFile || '准备下载...'} · {modelProgress?.completedTasks || 0}/
-              {modelProgress?.totalTasks || '?'}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" align="center">
-              {Number.isFinite(modelProgress?.fileTotalBytes) && modelProgress.fileTotalBytes > 0
-                ? `${formatBytes(modelProgress?.fileDownloadedBytes || 0)} / ${formatBytes(modelProgress?.fileTotalBytes || 0)} · ${formatBytesPerSecond(modelProgress?.downloadSpeedBytesPerSec || 0)} · 预计剩余 ${formatEta(modelProgress?.estimatedRemainingSeconds)}`
-                : '正在获取下载大小与速度信息...'}
-            </Typography>
-            <Collapse in={downloadDetailsOpen}>
-              <Box
-                component="pre"
-                sx={{
-                  m: 0,
-                  p: 1.5,
-                  maxHeight: 220,
-                  overflow: 'auto',
-                  borderRadius: 1,
-                  bgcolor: 'action.hover',
-                  color: 'text.primary',
-                  fontSize: 12,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {modelInstallLogs.length ? modelInstallLogs.join('\n') : '暂无日志。'}
-              </Box>
-            </Collapse>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDownloadDetailsOpen((previous) => !previous)}>
-            {downloadDetailsOpen ? '收起详情' : '详情'}
-          </Button>
-          <Button onClick={() => setDownloadDialogOpen(false)}>
-            {isDownloadingModels ? '后台继续' : '关闭'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Stack>
   );
 }

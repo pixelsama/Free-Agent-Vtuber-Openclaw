@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import ConfigDrawer from './components/config/ConfigDrawer.jsx';
+import UnifiedDownloadDialog from './components/download/UnifiedDownloadDialog.jsx';
 import { useStreamingSubtitleBridge } from './hooks/chat/useStreamingSubtitleBridge.js';
 import { useTextComposerController } from './hooks/chat/useTextComposerController.js';
 import { useConfigPanelController } from './hooks/config/useConfigPanelController.js';
+import { useUnifiedDownloader } from './hooks/download/useUnifiedDownloader.js';
 import { useStreamingChat } from './hooks/useStreamingChat.js';
 import { useSubtitleFeed } from './hooks/useSubtitleFeed.js';
 import { usePetHoverPassthrough } from './hooks/pet/usePetHoverPassthrough.js';
@@ -38,6 +40,16 @@ function AppContent({ desktopMode }) {
   const { startStreaming, cancelStreaming, onDelta, onDone, onError, isStreaming } = useStreamingChat();
 
   const normalizeError = useCallback((error) => normalizeErrorMessage(error, t), [t]);
+  const {
+    activeTask,
+    dialogOpen: downloadDialogOpen,
+    detailsOpen: downloadDetailsOpen,
+    setDetailsOpen: setDownloadDetailsOpen,
+    closeDialog: closeDownloadDialog,
+    openTask: openDownloadTask,
+    ensureTask: ensureDownloadTask,
+    handleProgress: handleDownloadProgress,
+  } = useUnifiedDownloader();
 
   const {
     chatBackendSettings,
@@ -58,6 +70,42 @@ function AppContent({ desktopMode }) {
     t,
     normalizeError,
   });
+
+  useEffect(() => {
+    if (!desktopMode) {
+      return () => {};
+    }
+
+    const offVoiceModelProgress = desktopBridge.voiceModels.onDownloadProgress((payload = {}) => {
+      handleDownloadProgress({
+        taskId: 'voice-models',
+        title: t('download.voiceModelsTitle'),
+        payload,
+      });
+    });
+
+    const offNanobotRuntimeProgress = desktopBridge.nanobotRuntime.onProgress((payload = {}) => {
+      handleDownloadProgress({
+        taskId: 'nanobot-runtime',
+        title: t('download.nanobotRuntimeTitle'),
+        payload,
+      });
+    });
+
+    return () => {
+      offVoiceModelProgress?.();
+      offNanobotRuntimeProgress?.();
+    };
+  }, [desktopMode, handleDownloadProgress, t]);
+
+  const handleInstallNanobotRuntime = useCallback(async () => {
+    ensureDownloadTask({
+      taskId: 'nanobot-runtime',
+      title: t('download.nanobotRuntimeTitle'),
+    });
+    openDownloadTask('nanobot-runtime');
+    await onInstallNanobotRuntime();
+  }, [ensureDownloadTask, onInstallNanobotRuntime, openDownloadTask, t]);
 
   const { showConfigPanel, openConfigPanel, closeConfigPanel } = useConfigPanelController({
     isPetMode,
@@ -230,7 +278,15 @@ function AppContent({ desktopMode }) {
         onClearSavedToken={onClearSavedToken}
         nanobotRuntimeStatus={nanobotRuntimeStatus}
         nanobotRuntimeInstalling={nanobotRuntimeInstalling}
-        onInstallNanobotRuntime={onInstallNanobotRuntime}
+        onInstallNanobotRuntime={handleInstallNanobotRuntime}
+        onOpenDownloadCenter={openDownloadTask}
+      />
+      <UnifiedDownloadDialog
+        open={downloadDialogOpen}
+        task={activeTask}
+        detailsOpen={downloadDetailsOpen}
+        onToggleDetails={() => setDownloadDetailsOpen((prev) => !prev)}
+        onClose={closeDownloadDialog}
       />
     </Box>
   );

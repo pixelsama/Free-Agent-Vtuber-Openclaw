@@ -59,6 +59,9 @@ const nanobotRuntime = {
   install(payload) {
     return ipcRenderer.invoke('nanobot-runtime:install', payload);
   },
+  onProgress(handler) {
+    return onChannel('nanobot-runtime:progress', handler);
+  },
 };
 
 const windowMode = {

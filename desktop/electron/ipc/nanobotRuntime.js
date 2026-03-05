@@ -18,6 +18,7 @@ function toNanobotRuntimeError(error) {
 function registerNanobotRuntimeIpc({
   ipcMain,
   nanobotRuntimeManager,
+  emitProgress,
 }) {
   ipcMain.handle('nanobot-runtime:status', async () => {
     return nanobotRuntimeManager.getStatus();
@@ -27,6 +28,11 @@ function registerNanobotRuntimeIpc({
     try {
       const status = await nanobotRuntimeManager.installRuntime({
         force: Boolean(payload.force),
+        onProgress: (progressPayload) => {
+          if (typeof emitProgress === 'function') {
+            emitProgress(progressPayload);
+          }
+        },
       });
       return {
         ok: true,

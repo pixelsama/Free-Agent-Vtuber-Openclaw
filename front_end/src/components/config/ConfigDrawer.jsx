@@ -55,6 +55,7 @@ export default function ConfigDrawer({
   nanobotRuntimeStatus = {},
   nanobotRuntimeInstalling = false,
   onInstallNanobotRuntime,
+  onOpenDownloadCenter,
 }) {
   const { language, setLanguage, t } = useI18n();
   const { themeMode, setThemeMode } = useThemeMode();
@@ -337,7 +338,10 @@ export default function ConfigDrawer({
             )}
 
             {activeConfigTab === 2 && (
-              <VoiceSettingsPanel desktopMode={desktopMode} />
+              <VoiceSettingsPanel
+                desktopMode={desktopMode}
+                onOpenDownloadCenter={onOpenDownloadCenter}
+              />
             )}
 
             {activeConfigTab === 3 && (

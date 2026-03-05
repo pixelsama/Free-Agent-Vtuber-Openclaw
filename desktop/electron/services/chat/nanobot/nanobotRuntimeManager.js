@@ -131,12 +131,35 @@ function requestWithRedirect(urlString, redirectsLeft) {
   });
 }
 
-async function downloadFileFromUrl({ url, destinationPath }) {
+async function downloadFileFromUrl({ url, destinationPath, onProgress }) {
   const response = await requestWithRedirect(url, MAX_REDIRECTS);
+  const totalBytes = Number.parseInt(response.headers['content-length'], 10);
+  const hasTotalBytes = Number.isFinite(totalBytes) && totalBytes > 0;
+  const expectedTotalBytes = hasTotalBytes ? totalBytes : 0;
 
   await fsp.mkdir(path.dirname(destinationPath), { recursive: true });
   const tempPath = `${destinationPath}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const writeStream = fs.createWriteStream(tempPath);
+  let downloadedBytes = 0;
+  const startedAt = Date.now();
+
+  response.on('data', (chunk) => {
+    downloadedBytes += chunk.length;
+    if (typeof onProgress === 'function') {
+      const elapsedSeconds = Math.max(0.001, (Date.now() - startedAt) / 1000);
+      const bytesPerSecond = downloadedBytes / elapsedSeconds;
+      const estimatedRemainingSeconds =
+        expectedTotalBytes > 0 && bytesPerSecond > 0
+          ? Math.max(0, (expectedTotalBytes - downloadedBytes) / bytesPerSecond)
+          : null;
+      onProgress({
+        downloadedBytes,
+        totalBytes: expectedTotalBytes,
+        bytesPerSecond,
+        estimatedRemainingSeconds,
+      });
+    }
+  });
 
   try {
     await pipeline(response, writeStream);
@@ -371,18 +394,29 @@ class NanobotRuntimeManager {
     return candidates[0];
   }
 
-  async installRuntime({ force = false } = {}) {
+  async installRuntime({ force = false, onProgress } = {}) {
     if (this.installPromise) {
       return this.installPromise;
     }
 
-    this.installPromise = this.installRuntimeInternal({ force }).finally(() => {
+    this.installPromise = this.installRuntimeInternal({ force, onProgress }).finally(() => {
       this.installPromise = null;
     });
     return this.installPromise;
   }
 
-  async installRuntimeInternal({ force = false } = {}) {
+  async installRuntimeInternal({ force = false, onProgress } = {}) {
+    const emitProgress = (payload = {}) => {
+      if (typeof onProgress !== 'function') {
+        return;
+      }
+      try {
+        onProgress(payload);
+      } catch (error) {
+        console.warn('nanobot runtime progress emit failed:', error);
+      }
+    };
+
     const existingStatus = this.getStatus();
     if (existingStatus.installed && existingStatus.managedByApp && !force) {
       return existingStatus;
@@ -391,6 +425,15 @@ class NanobotRuntimeManager {
     if (existingStatus.source === 'env' && !force) {
       return existingStatus;
     }
+
+    const totalTasks = 4;
+    emitProgress({
+      phase: 'started',
+      completedTasks: 0,
+      totalTasks,
+      currentFile: '',
+      overallProgress: 0,
+    });
 
     const pythonExecutable = this.resolvePythonExecutable();
     await this.verifyPythonExecutable(pythonExecutable);
@@ -404,11 +447,39 @@ class NanobotRuntimeManager {
     await fsp.mkdir(this.stageDir, { recursive: true });
 
     try {
+      emitProgress({
+        phase: 'running',
+        completedTasks: 0,
+        totalTasks,
+        currentFile: path.basename(archiveUrl),
+        overallProgress: 0,
+      });
       await this.downloadFileImpl({
         url: archiveUrl,
         destinationPath: archivePath,
+        onProgress: ({ downloadedBytes, totalBytes, bytesPerSecond, estimatedRemainingSeconds }) => {
+          const ratio = totalBytes > 0 ? Math.min(1, downloadedBytes / totalBytes) : 0;
+          emitProgress({
+            phase: 'running',
+            completedTasks: 0,
+            totalTasks,
+            currentFile: path.basename(archiveUrl),
+            overallProgress: (0 + ratio) / totalTasks,
+            fileDownloadedBytes: downloadedBytes,
+            fileTotalBytes: totalBytes,
+            downloadSpeedBytesPerSec: bytesPerSecond,
+            estimatedRemainingSeconds,
+          });
+        },
       });
 
+      emitProgress({
+        phase: 'extracting',
+        completedTasks: 1,
+        totalTasks,
+        currentFile: path.basename(archivePath),
+        overallProgress: 1 / totalTasks,
+      });
       await fsp.rm(stagePath, { recursive: true, force: true });
       await fsp.mkdir(stagePath, { recursive: true });
       await this.extractArchiveImpl({
@@ -421,10 +492,24 @@ class NanobotRuntimeManager {
         throw createRuntimeError('nanobot_runtime_install_failed', 'Downloaded Nanobot archive is empty.');
       }
 
+      emitProgress({
+        phase: 'running',
+        completedTasks: 2,
+        totalTasks,
+        currentFile: 'moving runtime files',
+        overallProgress: 2 / totalTasks,
+      });
       await fsp.rm(this.repoDir, { recursive: true, force: true });
       await fsp.rename(extractedRepoPath, this.repoDir);
       await fsp.rm(stagePath, { recursive: true, force: true }).catch(() => {});
 
+      emitProgress({
+        phase: 'installing',
+        completedTasks: 3,
+        totalTasks,
+        currentFile: 'pip install -e nanobot',
+        overallProgress: 3 / totalTasks,
+      });
       await this.runCommandImpl(
         pythonExecutable,
         ['-m', 'pip', 'install', '--upgrade', '-e', this.repoDir],
@@ -438,6 +523,27 @@ class NanobotRuntimeManager {
         installedAt: new Date().toISOString(),
       };
       await this.persistState();
+
+      emitProgress({
+        phase: 'completed',
+        completedTasks: totalTasks,
+        totalTasks,
+        currentFile: '',
+        overallProgress: 1,
+      });
+    } catch (error) {
+      emitProgress({
+        phase: 'failed',
+        completedTasks: 0,
+        totalTasks,
+        currentFile: '',
+        overallProgress: 0,
+        error: {
+          code: error?.code || 'nanobot_runtime_install_failed',
+          message: error?.message || 'Nanobot runtime install failed.',
+        },
+      });
+      throw error;
     } finally {
       if (!isTruthyEnv(this.env.NANOBOT_KEEP_ARCHIVE)) {
         await fsp.rm(archivePath, { force: true }).catch(() => {});
