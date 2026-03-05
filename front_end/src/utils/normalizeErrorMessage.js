@@ -23,6 +23,9 @@ export function normalizeErrorMessage(error, t) {
   if (code === 'nanobot_missing_config') {
     return t('error.nanobotMissingConfig');
   }
+  if (code === 'nanobot_not_enabled') {
+    return t('error.nanobotNotEnabled');
+  }
   if (code === 'nanobot_runtime_not_ready') {
     return t('error.nanobotRuntimeNotReady');
   }

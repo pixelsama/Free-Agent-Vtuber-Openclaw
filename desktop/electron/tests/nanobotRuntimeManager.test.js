@@ -40,7 +40,7 @@ async function createTestManager({
   };
 }
 
-test('nanobot runtime manager resolves env configured repo path', async () => {
+test('nanobot runtime manager does not resolve external repo path from env', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nanobot-runtime-env-test-'));
   const repoPath = path.join(tmpDir, 'nanobot');
   await fs.mkdir(repoPath, { recursive: true });
@@ -54,9 +54,9 @@ test('nanobot runtime manager resolves env configured repo path', async () => {
   });
 
   const status = manager.getStatus();
-  assert.equal(status.installed, true);
-  assert.equal(status.repoPath, repoPath);
-  assert.equal(status.source, 'env');
+  assert.equal(status.installed, false);
+  assert.equal(status.repoPath, '');
+  assert.equal(status.source, '');
   assert.equal(status.pythonExecutable, '/usr/bin/python3');
 });
 

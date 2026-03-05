@@ -29,6 +29,28 @@ import {
 } from '../../theme/ThemeModeContext.jsx';
 
 const CONFIG_DRAWER_WIDTH = 420;
+const MASKED_SECRET_VALUE = '********';
+
+function normalizeMaskedSecretInput(rawValue, hasSavedSecret) {
+  if (!hasSavedSecret) {
+    return rawValue;
+  }
+
+  const value = typeof rawValue === 'string' ? rawValue : '';
+  if (!value) {
+    return '';
+  }
+
+  if (/^\*+$/.test(value)) {
+    return '';
+  }
+
+  if (value.startsWith(MASKED_SECRET_VALUE)) {
+    return value.slice(MASKED_SECRET_VALUE.length);
+  }
+
+  return value;
+}
 
 export default function ConfigDrawer({
   open = false,
@@ -67,6 +89,13 @@ export default function ConfigDrawer({
   const hasBackendSecret = selectedBackend === 'nanobot' ? nanobotSettings.hasApiKey : openClawSettings.hasToken;
   const nanobotRuntimeInstalled = Boolean(nanobotRuntimeStatus?.installed);
   const nanobotRuntimePath = nanobotRuntimeStatus?.repoPath || '';
+  const openClawTokenSaved = Boolean(openClawSettings.hasToken && !(openClawSettings.token || '').trim());
+  const nanobotApiKeySaved = Boolean(nanobotSettings.hasApiKey && !(nanobotSettings.apiKey || '').trim());
+  const openClawTokenValue = openClawTokenSaved ? MASKED_SECRET_VALUE : (openClawSettings.token || '');
+  const nanobotApiKeyValue = nanobotApiKeySaved ? MASKED_SECRET_VALUE : (nanobotSettings.apiKey || '');
+  const testButtonDisabled = settingsSaving
+    || settingsTesting
+    || (selectedBackend === 'nanobot' && !nanobotSettings.enabled);
 
   useEffect(() => {
     if (!open) {
@@ -179,11 +208,15 @@ export default function ConfigDrawer({
 
                     <TextField
                       label="OpenClaw Token"
-                      value={openClawSettings.token || ''}
-                      onChange={(event) => onOpenClawSettingChange?.('token', event.target.value)}
+                      value={openClawTokenValue}
+                      onChange={(event) => {
+                        const nextToken = normalizeMaskedSecretInput(event.target.value, openClawTokenSaved);
+                        onOpenClawSettingChange?.('token', nextToken);
+                      }}
                       type="password"
                       autoComplete="off"
                       placeholder={openClawSettings.hasToken ? t('app.tokenSavedPlaceholder') : ''}
+                      helperText={openClawTokenSaved ? t('app.tokenSavedPlaceholder') : ''}
                       fullWidth
                     />
 
@@ -267,13 +300,27 @@ export default function ConfigDrawer({
 
                     <TextField
                       label={t('app.nanobotApiKey')}
-                      value={nanobotSettings.apiKey || ''}
-                      onChange={(event) => onNanobotSettingChange?.('apiKey', event.target.value)}
+                      value={nanobotApiKeyValue}
+                      onChange={(event) => {
+                        const nextApiKey = normalizeMaskedSecretInput(event.target.value, nanobotApiKeySaved);
+                        onNanobotSettingChange?.('apiKey', nextApiKey);
+                      }}
                       type="password"
                       autoComplete="off"
                       placeholder={nanobotSettings.hasApiKey ? t('app.tokenSavedPlaceholder') : ''}
+                      helperText={nanobotApiKeySaved ? t('app.tokenSavedPlaceholder') : ''}
                       fullWidth
                     />
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: -0.5 }}>
+                      <Button
+                        size="small"
+                        color="warning"
+                        onClick={onClearSavedToken}
+                        disabled={settingsSaving || settingsTesting || !nanobotSettings.hasApiKey}
+                      >
+                        {t('app.nanobotClearApiKey')}
+                      </Button>
+                    </Box>
 
                     <Stack direction="row" spacing={1}>
                       <TextField
@@ -323,7 +370,7 @@ export default function ConfigDrawer({
                   <Button
                     variant="outlined"
                     onClick={onTestChatBackendSettings}
-                    disabled={settingsSaving || settingsTesting}
+                    disabled={testButtonDisabled}
                   >
                     {settingsTesting ? t('app.testingConnection') : t('app.connectionTest')}
                   </Button>

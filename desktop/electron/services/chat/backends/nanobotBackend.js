@@ -46,7 +46,7 @@ class NanobotBackendAdapter extends ChatBackendAdapter {
     const config = normalizeNanobotConfig(settings);
 
     if (!config.enabled) {
-      throw createNanobotError('nanobot_missing_config', 'Nanobot 未启用，请先在设置中开启。');
+      throw createNanobotError('nanobot_not_enabled', 'Nanobot 未启用，请先在设置中开启。');
     }
 
     if (!config.provider || !config.model || !config.apiKey) {

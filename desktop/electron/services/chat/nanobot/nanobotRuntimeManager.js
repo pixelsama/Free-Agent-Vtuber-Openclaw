@@ -268,27 +268,10 @@ class NanobotRuntimeManager {
     );
   }
 
-  resolveConfiguredRepoPath() {
-    const configured = sanitizeText(this.env.NANOBOT_REPO_PATH);
-    if (configured && fs.existsSync(configured)) {
-      return {
-        path: configured,
-        source: 'env',
-      };
-    }
-    return null;
-  }
-
   resolveInstalledRepoPath() {
-    const statePath = sanitizeText(this.state.repoPath);
-    if (statePath && fs.existsSync(statePath)) {
-      return {
-        path: statePath,
-        source: sanitizeText(this.state.source) || 'downloaded',
-      };
-    }
-
-    if (fs.existsSync(this.repoDir)) {
+    const pyprojectPath = path.join(this.repoDir, 'pyproject.toml');
+    const packageDir = path.join(this.repoDir, 'nanobot');
+    if (fs.existsSync(this.repoDir) && fs.existsSync(pyprojectPath) && fs.existsSync(packageDir)) {
       return {
         path: this.repoDir,
         source: 'downloaded',
@@ -297,27 +280,8 @@ class NanobotRuntimeManager {
     return null;
   }
 
-  resolveLocalDevRepoPath() {
-    const candidates = [
-      path.resolve(process.cwd(), '../nanobot'),
-      path.resolve(this.app.getAppPath(), '../nanobot'),
-      path.resolve(this.app.getPath('userData'), '../nanobot'),
-    ];
-
-    for (const candidatePath of candidates) {
-      if (fs.existsSync(candidatePath)) {
-        return {
-          path: candidatePath,
-          source: 'local',
-        };
-      }
-    }
-
-    return null;
-  }
-
   resolveRepoPath() {
-    return this.resolveConfiguredRepoPath() || this.resolveInstalledRepoPath() || this.resolveLocalDevRepoPath() || null;
+    return this.resolveInstalledRepoPath() || null;
   }
 
   resolvePythonExecutable() {
@@ -419,10 +383,6 @@ class NanobotRuntimeManager {
 
     const existingStatus = this.getStatus();
     if (existingStatus.installed && existingStatus.managedByApp && !force) {
-      return existingStatus;
-    }
-
-    if (existingStatus.source === 'env' && !force) {
       return existingStatus;
     }
 

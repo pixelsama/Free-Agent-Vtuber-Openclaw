@@ -14,7 +14,7 @@ test('nanobot backend validates required settings', () => {
 
   assert.throws(
     () => backend.validateSettings({ nanobot: { enabled: false } }),
-    (error) => error && error.code === 'nanobot_missing_config',
+    (error) => error && error.code === 'nanobot_not_enabled',
   );
 
   assert.throws(

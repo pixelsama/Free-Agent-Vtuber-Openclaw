@@ -24,6 +24,7 @@ const MESSAGES = {
 
     'error.openclawMissingConfig': '请先填写 OpenClaw Base URL / Token / Agent ID。',
     'error.openclawUnreachable': '无法访问 OpenClaw。',
+    'error.nanobotNotEnabled': 'Nanobot 当前处于禁用状态，请先切换为启用。',
     'error.nanobotMissingConfig': '请先完善 Nanobot 配置（Provider / Model / API Key）。',
     'error.nanobotRuntimeNotReady': 'Nanobot 运行时未就绪。',
     'error.nanobotBootFailed': 'Nanobot 启动失败。',
@@ -47,6 +48,7 @@ const MESSAGES = {
     'app.nanobotModel': 'Nanobot Model',
     'app.nanobotApiBase': 'Nanobot API Base',
     'app.nanobotApiKey': 'Nanobot API Key',
+    'app.nanobotClearApiKey': '清除已保存 API Key',
     'app.nanobotMaxTokens': 'Nanobot Max Tokens',
     'app.nanobotTemperature': 'Nanobot Temperature',
     'app.nanobotReasoningEffort': 'Nanobot Reasoning Effort',
@@ -228,6 +230,7 @@ const MESSAGES = {
 
     'error.openclawMissingConfig': 'Please fill OpenClaw Base URL / Token / Agent ID first.',
     'error.openclawUnreachable': 'Unable to reach OpenClaw.',
+    'error.nanobotNotEnabled': 'Nanobot is currently disabled. Enable it first.',
     'error.nanobotMissingConfig': 'Please complete Nanobot settings (Provider / Model / API Key).',
     'error.nanobotRuntimeNotReady': 'Nanobot runtime is not ready.',
     'error.nanobotBootFailed': 'Nanobot failed to boot.',
@@ -251,6 +254,7 @@ const MESSAGES = {
     'app.nanobotModel': 'Nanobot Model',
     'app.nanobotApiBase': 'Nanobot API Base',
     'app.nanobotApiKey': 'Nanobot API Key',
+    'app.nanobotClearApiKey': 'Clear Saved API Key',
     'app.nanobotMaxTokens': 'Nanobot Max Tokens',
     'app.nanobotTemperature': 'Nanobot Temperature',
     'app.nanobotReasoningEffort': 'Nanobot Reasoning Effort',
