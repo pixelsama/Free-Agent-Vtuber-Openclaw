@@ -52,6 +52,15 @@ const settings = {
   },
 };
 
+const nanobotRuntime = {
+  status() {
+    return ipcRenderer.invoke('nanobot-runtime:status');
+  },
+  install(payload) {
+    return ipcRenderer.invoke('nanobot-runtime:install', payload);
+  },
+};
+
 const windowMode = {
   setMode(mode) {
     return ipcRenderer.invoke('pet:set-mode', { mode });
@@ -159,6 +168,7 @@ contextBridge.exposeInMainWorld('desktop', {
   platform: process.platform,
   chatStream,
   settings,
+  nanobotRuntime,
   windowMode,
   windowControls,
   voice,

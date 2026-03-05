@@ -1,27 +1,113 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { desktopBridge } from '../../services/desktopBridge.js';
 
-const defaultOpenClawSettings = {
-  baseUrl: '',
-  token: '',
-  agentId: 'main',
-  hasToken: false,
+const defaultChatBackendSettings = {
+  chatBackend: 'openclaw',
+  openclaw: {
+    baseUrl: '',
+    token: '',
+    agentId: 'main',
+    hasToken: false,
+  },
+  nanobot: {
+    enabled: false,
+    workspace: '',
+    provider: 'openrouter',
+    model: 'anthropic/claude-opus-4-5',
+    apiBase: '',
+    apiKey: '',
+    maxTokens: 4096,
+    temperature: 0.2,
+    reasoningEffort: '',
+    hasApiKey: false,
+  },
   hasSecureStorage: true,
 };
 
-export function buildOpenClawSettingsPayload(settings) {
-  const payload = {
-    baseUrl: settings?.baseUrl || '',
-    agentId: settings?.agentId || '',
+const defaultNanobotRuntimeStatus = {
+  ok: false,
+  installed: false,
+  source: '',
+  repoPath: '',
+  pythonExecutable: '',
+  managedByApp: false,
+  installing: false,
+};
+
+function normalizeSettingsForState(settings = {}) {
+  const openclaw = settings?.openclaw || {};
+  const nanobot = settings?.nanobot || {};
+  const chatBackend = settings?.chatBackend === 'nanobot' ? 'nanobot' : 'openclaw';
+
+  return {
+    ...defaultChatBackendSettings,
+    ...settings,
+    chatBackend,
+    openclaw: {
+      ...defaultChatBackendSettings.openclaw,
+      ...openclaw,
+      token: '',
+      hasToken: Boolean(openclaw.hasToken || settings?.hasToken),
+    },
+    nanobot: {
+      ...defaultChatBackendSettings.nanobot,
+      ...nanobot,
+      apiKey: '',
+      hasApiKey: Boolean(nanobot.hasApiKey || settings?.hasNanobotApiKey),
+    },
+    hasSecureStorage: settings?.hasSecureStorage !== false,
   };
-  const token = settings?.token?.trim?.() || '';
-  if (token) {
-    payload.token = token;
+}
+
+export function buildChatBackendSettingsPayload(settings) {
+  const source = settings || {};
+  const openclawSource = source?.openclaw || source;
+  const nanobotSource = source?.nanobot || {};
+  const chatBackend = source?.chatBackend === 'nanobot' ? 'nanobot' : 'openclaw';
+
+  const payload = {
+    chatBackend,
+    openclaw: {
+      baseUrl: openclawSource?.baseUrl || '',
+      agentId: openclawSource?.agentId || '',
+    },
+    nanobot: {
+      enabled: Boolean(nanobotSource?.enabled),
+      workspace: nanobotSource?.workspace || '',
+      provider: nanobotSource?.provider || '',
+      model: nanobotSource?.model || '',
+      apiBase: nanobotSource?.apiBase || '',
+      maxTokens: Number.isFinite(nanobotSource?.maxTokens) ? nanobotSource.maxTokens : 4096,
+      temperature: Number.isFinite(nanobotSource?.temperature) ? nanobotSource.temperature : 0.2,
+      reasoningEffort: nanobotSource?.reasoningEffort || '',
+    },
+  };
+
+  const openclawToken = (openclawSource?.token || source?.token || '').trim?.() || '';
+  if (openclawToken) {
+    payload.openclaw.token = openclawToken;
   }
+
+  const nanobotApiKey = (nanobotSource?.apiKey || source?.nanobotApiKey || '').trim?.() || '';
+  if (nanobotApiKey) {
+    payload.nanobot.apiKey = nanobotApiKey;
+  }
+
   return payload;
 }
 
-export function formatOpenClawSettingsError({ error, normalizeError, t }) {
+export function buildOpenClawSettingsPayload(settings) {
+  const payload = buildChatBackendSettingsPayload({
+    ...defaultChatBackendSettings,
+    openclaw: {
+      ...defaultChatBackendSettings.openclaw,
+      ...(settings || {}),
+    },
+  });
+  return payload.openclaw;
+}
+
+export function formatChatBackendSettingsError({ error, normalizeError, t }) {
   if (typeof normalizeError === 'function') {
     return normalizeError(error);
   }
@@ -37,17 +123,36 @@ export function formatOpenClawSettingsError({ error, normalizeError, t }) {
   return t('common.requestFailed');
 }
 
-export function useOpenClawSettings({ t, normalizeError }) {
-  const [openClawSettings, setOpenClawSettings] = useState(defaultOpenClawSettings);
+export function formatOpenClawSettingsError({ error, normalizeError, t }) {
+  return formatChatBackendSettingsError({ error, normalizeError, t });
+}
+
+export function useChatBackendSettings({ t, normalizeError }) {
+  const [chatBackendSettings, setChatBackendSettings] = useState(defaultChatBackendSettings);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsTesting, setSettingsTesting] = useState(false);
   const [settingsFeedback, setSettingsFeedback] = useState('');
   const [settingsError, setSettingsError] = useState('');
+  const [nanobotRuntimeStatus, setNanobotRuntimeStatus] = useState(defaultNanobotRuntimeStatus);
+  const [nanobotRuntimeInstalling, setNanobotRuntimeInstalling] = useState(false);
 
   const formatError = useCallback(
-    (error) => formatOpenClawSettingsError({ error, normalizeError, t }),
+    (error) => formatChatBackendSettingsError({ error, normalizeError, t }),
     [normalizeError, t],
   );
+
+  const refreshNanobotRuntimeStatus = useCallback(async () => {
+    try {
+      const status = await desktopBridge.nanobotRuntime.status();
+      setNanobotRuntimeStatus({
+        ...defaultNanobotRuntimeStatus,
+        ...(status || {}),
+        installed: Boolean(status?.installed),
+      });
+    } catch {
+      setNanobotRuntimeStatus(defaultNanobotRuntimeStatus);
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -58,62 +163,88 @@ export function useOpenClawSettings({ t, normalizeError }) {
         if (!mounted) {
           return;
         }
-
-        setOpenClawSettings({
-          ...defaultOpenClawSettings,
-          ...settings,
-        });
+        setChatBackendSettings(normalizeSettingsForState(settings));
       } catch (error) {
-        console.error('Failed to load OpenClaw settings:', error);
+        console.error('Failed to load chat backend settings:', error);
       }
     };
 
     void loadSettings();
+    void refreshNanobotRuntimeStatus();
 
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [refreshNanobotRuntimeStatus]);
 
-  const onOpenClawSettingChange = useCallback((field, value) => {
-    setOpenClawSettings((prev) => ({
+  const onChatBackendChange = useCallback((backend) => {
+    setChatBackendSettings((prev) => ({
       ...prev,
-      [field]: value,
+      chatBackend: backend === 'nanobot' ? 'nanobot' : 'openclaw',
     }));
     setSettingsFeedback('');
     setSettingsError('');
   }, []);
 
-  const onSaveOpenClawSettings = useCallback(async () => {
+  const onOpenClawSettingChange = useCallback((field, value) => {
+    setChatBackendSettings((prev) => ({
+      ...prev,
+      openclaw: {
+        ...prev.openclaw,
+        [field]: value,
+      },
+    }));
+    setSettingsFeedback('');
+    setSettingsError('');
+  }, []);
+
+  const onNanobotSettingChange = useCallback((field, value) => {
+    setChatBackendSettings((prev) => ({
+      ...prev,
+      nanobot: {
+        ...prev.nanobot,
+        [field]: value,
+      },
+    }));
+    setSettingsFeedback('');
+    setSettingsError('');
+  }, []);
+
+  const onSaveChatBackendSettings = useCallback(async () => {
     setSettingsSaving(true);
     setSettingsError('');
     setSettingsFeedback('');
 
     try {
-      const payload = buildOpenClawSettingsPayload(openClawSettings);
-
+      const payload = buildChatBackendSettingsPayload(chatBackendSettings);
       const saved = await desktopBridge.settings.save(payload);
-      setOpenClawSettings({
-        ...defaultOpenClawSettings,
-        ...saved,
-      });
+      setChatBackendSettings((prev) => ({
+        ...normalizeSettingsForState(saved),
+        openclaw: {
+          ...normalizeSettingsForState(saved).openclaw,
+          token: prev.openclaw.token,
+        },
+        nanobot: {
+          ...normalizeSettingsForState(saved).nanobot,
+          apiKey: prev.nanobot.apiKey,
+        },
+      }));
       setSettingsFeedback(t('app.settingsSaved'));
     } catch (error) {
-      console.error('Save OpenClaw settings failed:', error);
+      console.error('Save chat backend settings failed:', error);
       setSettingsError(formatError(error));
     } finally {
       setSettingsSaving(false);
     }
-  }, [formatError, openClawSettings, t]);
+  }, [chatBackendSettings, formatError, t]);
 
-  const onTestOpenClawSettings = useCallback(async () => {
+  const onTestChatBackendSettings = useCallback(async () => {
     setSettingsTesting(true);
     setSettingsError('');
     setSettingsFeedback('');
 
     try {
-      const payload = buildOpenClawSettingsPayload(openClawSettings);
-
+      const payload = buildChatBackendSettingsPayload(chatBackendSettings);
       const result = await desktopBridge.settings.testConnection(payload);
       if (!result?.ok) {
         setSettingsError(formatError(result?.error));
@@ -122,12 +253,12 @@ export function useOpenClawSettings({ t, normalizeError }) {
         setSettingsFeedback(t('app.settingsConnected', { latency }));
       }
     } catch (error) {
-      console.error('Test OpenClaw settings failed:', error);
+      console.error('Test chat backend settings failed:', error);
       setSettingsError(formatError(error));
     } finally {
       setSettingsTesting(false);
     }
-  }, [formatError, openClawSettings, t]);
+  }, [chatBackendSettings, formatError, t]);
 
   const onClearSavedToken = useCallback(async () => {
     setSettingsSaving(true);
@@ -135,12 +266,32 @@ export function useOpenClawSettings({ t, normalizeError }) {
     setSettingsFeedback('');
 
     try {
-      const saved = await desktopBridge.settings.save({ clearToken: true });
-      setOpenClawSettings((prev) => ({
-        ...prev,
-        ...saved,
-        token: '',
-      }));
+      const clearPayload =
+        chatBackendSettings.chatBackend === 'nanobot'
+          ? {
+              nanobot: {
+                clearApiKey: true,
+              },
+            }
+          : {
+              openclaw: {
+                clearToken: true,
+              },
+            };
+
+      const saved = await desktopBridge.settings.save(clearPayload);
+      const normalizedSaved = normalizeSettingsForState(saved);
+      setChatBackendSettings({
+        ...normalizedSaved,
+        openclaw: {
+          ...normalizedSaved.openclaw,
+          token: '',
+        },
+        nanobot: {
+          ...normalizedSaved.nanobot,
+          apiKey: '',
+        },
+      });
       setSettingsFeedback(t('app.tokenCleared'));
     } catch (error) {
       console.error('Clear token failed:', error);
@@ -148,17 +299,58 @@ export function useOpenClawSettings({ t, normalizeError }) {
     } finally {
       setSettingsSaving(false);
     }
-  }, [formatError, t]);
+  }, [chatBackendSettings.chatBackend, formatError, t]);
+
+  const onInstallNanobotRuntime = useCallback(async () => {
+    setNanobotRuntimeInstalling(true);
+    setSettingsError('');
+    setSettingsFeedback('');
+
+    try {
+      const result = await desktopBridge.nanobotRuntime.install({});
+      if (!result?.ok) {
+        setSettingsError(formatError(result?.error));
+      } else {
+        setSettingsFeedback(t('app.nanobotRuntimeInstalled'));
+      }
+      await refreshNanobotRuntimeStatus();
+    } catch (error) {
+      setSettingsError(formatError(error));
+    } finally {
+      setNanobotRuntimeInstalling(false);
+    }
+  }, [formatError, refreshNanobotRuntimeStatus, t]);
+
+  const openClawSettings = useMemo(
+    () => ({
+      ...chatBackendSettings.openclaw,
+      hasSecureStorage: chatBackendSettings.hasSecureStorage,
+    }),
+    [chatBackendSettings],
+  );
 
   return {
+    chatBackendSettings,
     openClawSettings,
     settingsSaving,
     settingsTesting,
     settingsFeedback,
     settingsError,
+    onChatBackendChange,
     onOpenClawSettingChange,
-    onSaveOpenClawSettings,
-    onTestOpenClawSettings,
+    onNanobotSettingChange,
+    onSaveChatBackendSettings,
+    onTestChatBackendSettings,
+    onSaveOpenClawSettings: onSaveChatBackendSettings,
+    onTestOpenClawSettings: onTestChatBackendSettings,
     onClearSavedToken,
+    nanobotRuntimeStatus,
+    nanobotRuntimeInstalling,
+    onInstallNanobotRuntime,
+    refreshNanobotRuntimeStatus,
   };
+}
+
+export function useOpenClawSettings(options) {
+  return useChatBackendSettings(options);
 }

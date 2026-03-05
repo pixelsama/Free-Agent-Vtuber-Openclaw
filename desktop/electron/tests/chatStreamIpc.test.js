@@ -81,3 +81,66 @@ test('chat stream abort emits done with aborted flag', async () => {
   assert.equal(emitted[0].type, 'done');
   assert.equal(emitted[0].payload.aborted, true);
 });
+
+test('chat stream emits mapped error when backend resolution fails', async () => {
+  const ipcMain = createIpcMainMock();
+  const emitted = [];
+
+  registerChatStreamIpc({
+    ipcMain,
+    getSettings: () => ({ baseUrl: 'http://example.com', token: 'x', agentId: 'main' }),
+    emitEvent: (event) => emitted.push(event),
+    backendManager: {
+      resolveBackendName: () => {
+        const error = new Error('Unsupported chat backend: nanobot');
+        error.code = 'chat_backend_unsupported';
+        throw error;
+      },
+      mapError: (error) => ({
+        code: error.code || 'chat_backend_error',
+        message: error.message || 'backend error',
+      }),
+    },
+  });
+
+  await ipcMain.invoke('chat:stream:start', {
+    sessionId: 's1',
+    content: 'hello',
+    backend: 'nanobot',
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].type, 'error');
+  assert.equal(emitted[0].payload.code, 'chat_backend_unsupported');
+});
+
+test('chat stream respects explicit backend override', async () => {
+  const ipcMain = createIpcMainMock();
+  const emitted = [];
+  let usedBackend = null;
+
+  registerChatStreamIpc({
+    ipcMain,
+    getSettings: () => ({ chatBackend: 'openclaw' }),
+    emitEvent: (event) => emitted.push(event),
+    startStream: async ({ backend, onEvent }) => {
+      usedBackend = backend;
+      onEvent({ type: 'done', payload: { source: backend } });
+    },
+  });
+
+  await ipcMain.invoke('chat:stream:start', {
+    sessionId: 's1',
+    content: 'hello',
+    backend: 'nanobot',
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(usedBackend, 'nanobot');
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].type, 'done');
+  assert.equal(emitted[0].payload.source, 'nanobot');
+});

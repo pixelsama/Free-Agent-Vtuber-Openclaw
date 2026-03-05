@@ -15,6 +15,9 @@ function createTranslator() {
     if (key === 'error.openclawUnreachable') {
       return 'UNREACHABLE';
     }
+    if (key === 'error.nanobotRuntimeNotReady') {
+      return 'NANOBOT_RUNTIME_NOT_READY';
+    }
     return key;
   };
 }
@@ -34,6 +37,11 @@ describe('normalizeErrorMessage', () => {
     const t = createTranslator();
     expect(normalizeErrorMessage({ code: 'openclaw_missing_config' }, t)).toBe('MISSING_CONFIG');
     expect(normalizeErrorMessage({ payload: { code: 'openclaw_unreachable' } }, t)).toBe('UNREACHABLE');
+  });
+
+  it('maps nanobot error codes into translated message', () => {
+    const t = createTranslator();
+    expect(normalizeErrorMessage({ code: 'nanobot_runtime_not_ready' }, t)).toBe('NANOBOT_RUNTIME_NOT_READY');
   });
 
   it('keeps explicit message when provided', () => {

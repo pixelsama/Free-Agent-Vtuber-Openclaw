@@ -1,7 +1,13 @@
 const { randomUUID } = require('node:crypto');
-const { startOpenClawStream, toClientError } = require('../services/openclawClient');
+const { createChatBackendManager } = require('../services/chat/backendManager');
 
-function registerChatStreamIpc({ ipcMain, emitEvent, getSettings, startStream = startOpenClawStream }) {
+function registerChatStreamIpc({
+  ipcMain,
+  emitEvent,
+  getSettings,
+  startStream,
+  backendManager = createChatBackendManager(),
+}) {
   const streamMap = new Map();
 
   const sendEvent = (streamId, type, payload = {}) => {
@@ -33,9 +39,29 @@ function registerChatStreamIpc({ ipcMain, emitEvent, getSettings, startStream = 
   };
 
   const runStream = async (streamId, request, state) => {
+    let source = 'openclaw';
+
     try {
-      await startStream({
-        settings: getSettings(),
+      const settings = getSettings();
+      const backend = backendManager.resolveBackendName({
+        settings,
+        requestBackend: request.backend,
+      });
+      state.backend = backend;
+      source = state.backend || source;
+
+      const streamRunner =
+        typeof startStream === 'function'
+          ? startStream
+          : (payload) =>
+              backendManager.startStream({
+                ...payload,
+                backend,
+              });
+
+      await streamRunner({
+        backend,
+        settings,
         sessionId: request.sessionId,
         content: request.content,
         options: request.options || {},
@@ -46,12 +72,18 @@ function registerChatStreamIpc({ ipcMain, emitEvent, getSettings, startStream = 
           }
 
           if (event.type === 'done') {
-            completeStream(streamId, event.payload || { source: 'openclaw' });
+            completeStream(streamId, event.payload || { source });
             return;
           }
 
           if (event.type === 'error') {
-            failStream(streamId, event.payload || toClientError(new Error('upstream error')));
+            failStream(
+              streamId,
+              event.payload ||
+                backendManager.mapError(new Error('upstream error'), {
+                  backend: state.backend,
+                }),
+            );
             return;
           }
 
@@ -61,12 +93,17 @@ function registerChatStreamIpc({ ipcMain, emitEvent, getSettings, startStream = 
         },
       });
 
-      completeStream(streamId, { source: 'openclaw' });
+      completeStream(streamId, { source });
     } catch (error) {
       if (state.aborted || error?.name === 'AbortError') {
-        completeStream(streamId, { source: 'openclaw', aborted: true });
+        completeStream(streamId, { source, aborted: true });
       } else {
-        failStream(streamId, toClientError(error));
+        failStream(
+          streamId,
+          backendManager.mapError(error, {
+            backend: state.backend,
+          }),
+        );
       }
     } finally {
       streamMap.delete(streamId);
@@ -97,6 +134,7 @@ function registerChatStreamIpc({ ipcMain, emitEvent, getSettings, startStream = 
       {
         sessionId,
         content,
+        backend: typeof request.backend === 'string' ? request.backend : '',
         options: request.options || {},
       },
       state,

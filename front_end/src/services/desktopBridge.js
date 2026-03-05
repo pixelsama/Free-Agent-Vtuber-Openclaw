@@ -41,35 +41,203 @@ function resolvePlatformSyncFromApi(api) {
 }
 
 function normalizeSettingsResponse(settings = {}) {
-  return {
-    baseUrl: typeof settings.baseUrl === 'string' ? settings.baseUrl.trim() : '',
-    token: typeof settings.token === 'string' ? settings.token.trim() : '',
-    agentId: typeof settings.agentId === 'string' ? settings.agentId.trim() : 'main',
-    hasToken: Boolean(settings.hasToken || (typeof settings.token === 'string' && settings.token.trim())),
+  const chatBackend = settings?.chatBackend === 'nanobot' ? 'nanobot' : 'openclaw';
+  const openclaw = settings?.openclaw || {};
+  const nanobot = settings?.nanobot || {};
+  const hasToken = Boolean(settings?.hasToken || openclaw?.hasToken || (typeof settings?.token === 'string' && settings.token.trim()));
+  const hasNanobotApiKey = Boolean(
+    settings?.hasNanobotApiKey
+      || nanobot?.hasApiKey
+      || (typeof settings?.nanobotApiKey === 'string' && settings.nanobotApiKey.trim()),
+  );
+
+  const normalized = {
+    chatBackend,
+    openclaw: {
+      baseUrl:
+        typeof openclaw.baseUrl === 'string'
+          ? openclaw.baseUrl.trim()
+          : typeof settings.baseUrl === 'string'
+            ? settings.baseUrl.trim()
+            : '',
+      token: typeof openclaw.token === 'string' ? openclaw.token.trim() : '',
+      agentId:
+        typeof openclaw.agentId === 'string'
+          ? openclaw.agentId.trim()
+          : typeof settings.agentId === 'string'
+            ? settings.agentId.trim()
+            : 'main',
+      hasToken,
+    },
+    nanobot: {
+      enabled: Boolean(nanobot.enabled),
+      workspace: typeof nanobot.workspace === 'string' ? nanobot.workspace.trim() : '',
+      provider: typeof nanobot.provider === 'string' ? nanobot.provider.trim() : 'openrouter',
+      model: typeof nanobot.model === 'string' ? nanobot.model.trim() : 'anthropic/claude-opus-4-5',
+      apiBase: typeof nanobot.apiBase === 'string' ? nanobot.apiBase.trim() : '',
+      apiKey: typeof nanobot.apiKey === 'string' ? nanobot.apiKey.trim() : '',
+      maxTokens: Number.isFinite(nanobot.maxTokens) ? nanobot.maxTokens : 4096,
+      temperature: Number.isFinite(nanobot.temperature) ? nanobot.temperature : 0.2,
+      reasoningEffort: typeof nanobot.reasoningEffort === 'string' ? nanobot.reasoningEffort.trim() : '',
+      hasApiKey: hasNanobotApiKey,
+    },
     hasSecureStorage: settings.hasSecureStorage !== false,
+  };
+
+  return {
+    ...normalized,
+    // Legacy flat fields for backward compatibility.
+    baseUrl: normalized.openclaw.baseUrl,
+    token: normalized.openclaw.token,
+    agentId: normalized.openclaw.agentId,
+    hasToken: normalized.openclaw.hasToken,
+    hasNanobotApiKey: normalized.nanobot.hasApiKey,
   };
 }
 
 function normalizeSettingsPatch(settings = {}) {
-  const next = {};
-
-  if (Object.prototype.hasOwnProperty.call(settings, 'baseUrl')) {
-    next.baseUrl = typeof settings.baseUrl === 'string' ? settings.baseUrl.trim() : '';
-  }
-
-  if (Object.prototype.hasOwnProperty.call(settings, 'agentId')) {
-    next.agentId = typeof settings.agentId === 'string' ? settings.agentId.trim() : '';
-  }
-
-  if (Object.prototype.hasOwnProperty.call(settings, 'token')) {
-    next.token = typeof settings.token === 'string' ? settings.token.trim() : '';
-  }
-
-  if (Object.prototype.hasOwnProperty.call(settings, 'clearToken')) {
-    next.clearToken = Boolean(settings.clearToken);
-  }
-
-  return next;
+  return {
+    ...(Object.prototype.hasOwnProperty.call(settings, 'chatBackend')
+      ? { chatBackend: settings.chatBackend === 'nanobot' ? 'nanobot' : 'openclaw' }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(settings, 'baseUrl')
+      || Object.prototype.hasOwnProperty.call(settings, 'agentId')
+      || Object.prototype.hasOwnProperty.call(settings, 'token')
+      || Object.prototype.hasOwnProperty.call(settings, 'clearToken')
+      ? {
+          openclaw: {
+            ...(Object.prototype.hasOwnProperty.call(settings, 'baseUrl')
+              ? { baseUrl: typeof settings.baseUrl === 'string' ? settings.baseUrl.trim() : '' }
+              : {}),
+            ...(Object.prototype.hasOwnProperty.call(settings, 'agentId')
+              ? { agentId: typeof settings.agentId === 'string' ? settings.agentId.trim() : '' }
+              : {}),
+            ...(Object.prototype.hasOwnProperty.call(settings, 'token')
+              ? { token: typeof settings.token === 'string' ? settings.token.trim() : '' }
+              : {}),
+            ...(Object.prototype.hasOwnProperty.call(settings, 'clearToken')
+              ? { clearToken: Boolean(settings.clearToken) }
+              : {}),
+          },
+        }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(settings, 'openclaw')
+      ? {
+          openclaw: {
+            ...(typeof settings.openclaw === 'object' && settings.openclaw
+              ? {
+                  ...(Object.prototype.hasOwnProperty.call(settings.openclaw, 'baseUrl')
+                    ? {
+                        baseUrl:
+                          typeof settings.openclaw.baseUrl === 'string'
+                            ? settings.openclaw.baseUrl.trim()
+                            : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.openclaw, 'agentId')
+                    ? {
+                        agentId:
+                          typeof settings.openclaw.agentId === 'string'
+                            ? settings.openclaw.agentId.trim()
+                            : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.openclaw, 'token')
+                    ? {
+                        token:
+                          typeof settings.openclaw.token === 'string' ? settings.openclaw.token.trim() : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.openclaw, 'clearToken')
+                    ? {
+                        clearToken: Boolean(settings.openclaw.clearToken),
+                      }
+                    : {}),
+                }
+              : {}),
+          },
+        }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(settings, 'nanobot')
+      ? {
+          nanobot: {
+            ...(typeof settings.nanobot === 'object' && settings.nanobot
+              ? {
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'enabled')
+                    ? {
+                        enabled: Boolean(settings.nanobot.enabled),
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'workspace')
+                    ? {
+                        workspace:
+                          typeof settings.nanobot.workspace === 'string'
+                            ? settings.nanobot.workspace.trim()
+                            : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'provider')
+                    ? {
+                        provider:
+                          typeof settings.nanobot.provider === 'string'
+                            ? settings.nanobot.provider.trim()
+                            : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'model')
+                    ? {
+                        model: typeof settings.nanobot.model === 'string' ? settings.nanobot.model.trim() : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'apiBase')
+                    ? {
+                        apiBase:
+                          typeof settings.nanobot.apiBase === 'string'
+                            ? settings.nanobot.apiBase.trim()
+                            : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'maxTokens')
+                    ? {
+                        maxTokens: Number.isFinite(settings.nanobot.maxTokens)
+                          ? settings.nanobot.maxTokens
+                          : 4096,
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'temperature')
+                    ? {
+                        temperature: Number.isFinite(settings.nanobot.temperature)
+                          ? settings.nanobot.temperature
+                          : 0.2,
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'reasoningEffort')
+                    ? {
+                        reasoningEffort:
+                          typeof settings.nanobot.reasoningEffort === 'string'
+                            ? settings.nanobot.reasoningEffort.trim()
+                            : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'apiKey')
+                    ? {
+                        apiKey:
+                          typeof settings.nanobot.apiKey === 'string'
+                            ? settings.nanobot.apiKey.trim()
+                            : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'clearApiKey')
+                    ? {
+                        clearApiKey: Boolean(settings.nanobot.clearApiKey),
+                      }
+                    : {}),
+                }
+              : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 function loadWebSettings() {
@@ -98,23 +266,57 @@ function saveWebSettings(partialSettings = {}) {
 
   const merged = {
     ...current,
-    ...patch,
+    ...(Object.prototype.hasOwnProperty.call(patch, 'chatBackend')
+      ? { chatBackend: patch.chatBackend }
+      : {}),
+    openclaw: {
+      ...current.openclaw,
+      ...(patch.openclaw || {}),
+    },
+    nanobot: {
+      ...current.nanobot,
+      ...(patch.nanobot || {}),
+    },
     hasSecureStorage: false,
   };
 
-  if (patch.clearToken === true) {
-    merged.token = '';
+  if (patch.openclaw?.clearToken === true) {
+    merged.openclaw.token = '';
   }
 
-  merged.hasToken = Boolean(merged.token);
+  if (patch.nanobot?.clearApiKey === true) {
+    merged.nanobot.apiKey = '';
+  }
+
+  merged.openclaw.hasToken = Boolean(merged.openclaw.token);
+  merged.nanobot.hasApiKey = Boolean(merged.nanobot.apiKey);
+  merged.baseUrl = merged.openclaw.baseUrl;
+  merged.token = merged.openclaw.token;
+  merged.agentId = merged.openclaw.agentId;
+  merged.hasToken = merged.openclaw.hasToken;
+  merged.hasNanobotApiKey = merged.nanobot.hasApiKey;
 
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(
       SETTINGS_STORAGE_KEY,
       JSON.stringify({
-        baseUrl: merged.baseUrl,
-        token: merged.token,
-        agentId: merged.agentId,
+        chatBackend: merged.chatBackend,
+        openclaw: {
+          baseUrl: merged.openclaw.baseUrl,
+          token: merged.openclaw.token,
+          agentId: merged.openclaw.agentId,
+        },
+        nanobot: {
+          enabled: merged.nanobot.enabled,
+          workspace: merged.nanobot.workspace,
+          provider: merged.nanobot.provider,
+          model: merged.nanobot.model,
+          apiBase: merged.nanobot.apiBase,
+          apiKey: merged.nanobot.apiKey,
+          maxTokens: merged.nanobot.maxTokens,
+          temperature: merged.nanobot.temperature,
+          reasoningEffort: merged.nanobot.reasoningEffort,
+        },
       }),
     );
   }
@@ -127,14 +329,40 @@ async function testWebConnection(inputSettings = {}) {
   const current = loadWebSettings();
   const settings = {
     ...current,
-    ...patch,
+    ...(Object.prototype.hasOwnProperty.call(patch, 'chatBackend')
+      ? { chatBackend: patch.chatBackend }
+      : {}),
+    openclaw: {
+      ...current.openclaw,
+      ...(patch.openclaw || {}),
+    },
+    nanobot: {
+      ...current.nanobot,
+      ...(patch.nanobot || {}),
+    },
   };
 
-  if (settings.clearToken === true) {
-    settings.token = '';
+  const chatBackend = settings.chatBackend === 'nanobot' ? 'nanobot' : 'openclaw';
+
+  if (settings.openclaw?.clearToken === true) {
+    settings.openclaw.token = '';
   }
 
-  if (!settings.baseUrl || !settings.token || !settings.agentId) {
+  if (settings.nanobot?.clearApiKey === true) {
+    settings.nanobot.apiKey = '';
+  }
+
+  if (chatBackend === 'nanobot') {
+    return {
+      ok: false,
+      error: {
+        code: 'nanobot_runtime_not_ready',
+        message: 'Web 模式暂不支持 Nanobot 后端。',
+      },
+    };
+  }
+
+  if (!settings.openclaw?.baseUrl || !settings.openclaw?.token || !settings.openclaw?.agentId) {
     return {
       ok: false,
       error: {
@@ -146,15 +374,15 @@ async function testWebConnection(inputSettings = {}) {
 
   try {
     const startAt = Date.now();
-    const response = await fetch(`${settings.baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
+    const response = await fetch(`${settings.openclaw.baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${settings.token}`,
+        Authorization: `Bearer ${settings.openclaw.token}`,
         'Content-Type': 'application/json',
         accept: 'application/json',
       },
       body: JSON.stringify({
-        model: `openclaw:${settings.agentId}`,
+        model: `openclaw:${settings.openclaw.agentId}`,
         stream: false,
         max_tokens: 1,
         messages: [{ role: 'user', content: 'ping' }],
@@ -240,6 +468,34 @@ export const desktopBridge = {
         return api.settings.testConnection(patch);
       }
       return testWebConnection(patch);
+    },
+  },
+  nanobotRuntime: {
+    async status() {
+      const api = getDesktopApi();
+      if (api?.nanobotRuntime?.status) {
+        return api.nanobotRuntime.status();
+      }
+      return {
+        ok: false,
+        installed: false,
+        source: '',
+        repoPath: '',
+        pythonExecutable: '',
+      };
+    },
+    async install(payload = {}) {
+      const api = getDesktopApi();
+      if (api?.nanobotRuntime?.install) {
+        return api.nanobotRuntime.install(payload);
+      }
+      return {
+        ok: false,
+        error: {
+          code: 'nanobot_runtime_not_ready',
+          message: 'Web 模式暂不支持下载 Nanobot 运行时。',
+        },
+      };
     },
   },
   mode: {

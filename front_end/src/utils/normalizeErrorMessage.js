@@ -20,6 +20,24 @@ export function normalizeErrorMessage(error, t) {
   if (code === 'openclaw_unreachable') {
     return t('error.openclawUnreachable');
   }
+  if (code === 'nanobot_missing_config') {
+    return t('error.nanobotMissingConfig');
+  }
+  if (code === 'nanobot_runtime_not_ready') {
+    return t('error.nanobotRuntimeNotReady');
+  }
+  if (code === 'nanobot_boot_failed') {
+    return t('error.nanobotBootFailed');
+  }
+  if (code === 'nanobot_provider_unavailable') {
+    return t('error.nanobotProviderUnavailable');
+  }
+  if (code === 'nanobot_model_call_failed') {
+    return t('error.nanobotModelCallFailed');
+  }
+  if (code === 'nanobot_unreachable') {
+    return t('error.nanobotUnreachable');
+  }
 
   if (typeof error?.message === 'string' && error.message) {
     const streamStatusMatch = /^流式接口请求失败:\s*(\d+)/.exec(error.message);

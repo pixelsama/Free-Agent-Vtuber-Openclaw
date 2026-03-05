@@ -9,7 +9,7 @@ import { useStreamingChat } from './hooks/useStreamingChat.js';
 import { useSubtitleFeed } from './hooks/useSubtitleFeed.js';
 import { usePetHoverPassthrough } from './hooks/pet/usePetHoverPassthrough.js';
 import { usePetCursorTracking } from './hooks/pet/usePetCursorTracking.js';
-import { useOpenClawSettings } from './hooks/settings/useOpenClawSettings.js';
+import { useChatBackendSettings } from './hooks/settings/useOpenClawSettings.js';
 import { usePlatformInfo } from './hooks/window/usePlatformInfo.js';
 import { ModeProvider, MODE_PET, MODE_WINDOW, useModeContext } from './mode/ModeContext.jsx';
 import MainShell from './shells/MainShell.jsx';
@@ -40,16 +40,21 @@ function AppContent({ desktopMode }) {
   const normalizeError = useCallback((error) => normalizeErrorMessage(error, t), [t]);
 
   const {
-    openClawSettings,
+    chatBackendSettings,
     settingsSaving,
     settingsTesting,
     settingsFeedback,
     settingsError,
+    onChatBackendChange,
     onOpenClawSettingChange,
-    onSaveOpenClawSettings,
-    onTestOpenClawSettings,
+    onNanobotSettingChange,
+    onSaveChatBackendSettings,
+    onTestChatBackendSettings,
     onClearSavedToken,
-  } = useOpenClawSettings({
+    nanobotRuntimeStatus,
+    nanobotRuntimeInstalling,
+    onInstallNanobotRuntime,
+  } = useChatBackendSettings({
     t,
     normalizeError,
   });
@@ -212,15 +217,20 @@ function AppContent({ desktopMode }) {
         onModelChange={handleControlModelChange}
         onMotionsUpdate={setMotions}
         onExpressionsUpdate={setExpressions}
-        openClawSettings={openClawSettings}
+        chatBackendSettings={chatBackendSettings}
         settingsSaving={settingsSaving}
         settingsTesting={settingsTesting}
         settingsFeedback={settingsFeedback}
         settingsError={settingsError}
+        onChatBackendChange={onChatBackendChange}
         onOpenClawSettingChange={onOpenClawSettingChange}
-        onSaveOpenClawSettings={onSaveOpenClawSettings}
-        onTestOpenClawSettings={onTestOpenClawSettings}
+        onNanobotSettingChange={onNanobotSettingChange}
+        onSaveChatBackendSettings={onSaveChatBackendSettings}
+        onTestChatBackendSettings={onTestChatBackendSettings}
         onClearSavedToken={onClearSavedToken}
+        nanobotRuntimeStatus={nanobotRuntimeStatus}
+        nanobotRuntimeInstalling={nanobotRuntimeInstalling}
+        onInstallNanobotRuntime={onInstallNanobotRuntime}
       />
     </Box>
   );

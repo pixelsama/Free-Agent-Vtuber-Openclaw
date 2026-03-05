@@ -3,9 +3,14 @@ const { app, BrowserWindow, shell, ipcMain, protocol, screen } = require('electr
 
 const { registerChatStreamIpc } = require('./ipc/chatStream');
 const { registerLive2DModelsIpc } = require('./ipc/live2dModels');
+const { registerNanobotRuntimeIpc } = require('./ipc/nanobotRuntime');
 const { registerSettingsIpc } = require('./ipc/settings');
 const { registerVoiceModelsIpc } = require('./ipc/voiceModels');
 const { registerVoiceSessionIpc } = require('./ipc/voiceSession');
+const { createChatBackendManager } = require('./services/chat/backendManager');
+const { NanobotBackendAdapter } = require('./services/chat/backends/nanobotBackend');
+const { OpenClawBackendAdapter } = require('./services/chat/backends/openclawBackend');
+const { NanobotRuntimeManager } = require('./services/chat/nanobot/nanobotRuntimeManager');
 const { Live2DModelLibrary, MODEL_PROTOCOL } = require('./services/live2dModelLibrary');
 const { SettingsStore } = require('./services/settingsStore');
 const { VoiceModelLibrary } = require('./services/voice/voiceModelLibrary');
@@ -30,6 +35,7 @@ let mainWindow = null;
 let disposeChatStreamHandlers = null;
 let disposeModeHandlers = null;
 let disposeLive2DModelsHandlers = null;
+let disposeNanobotRuntimeHandlers = null;
 let disposeVoiceModelsHandlers = null;
 let disposeVoiceSessionHandlers = null;
 let startChatStreamFromMain = null;
@@ -38,7 +44,9 @@ let windowModeManager = null;
 let trayManager = null;
 let live2dModelLibrary = null;
 let voiceModelLibrary = null;
+let nanobotRuntimeManager = null;
 let isQuitting = false;
+let chatBackendManager = null;
 
 function isTruthyEnv(value) {
   if (typeof value !== 'string') {
@@ -223,9 +231,26 @@ async function bootstrap() {
   await live2dModelLibrary.init();
   voiceModelLibrary = new VoiceModelLibrary(app);
   await voiceModelLibrary.init();
+  nanobotRuntimeManager = new NanobotRuntimeManager(app, {
+    resolveVoiceEnv: () => {
+      if (!voiceModelLibrary) {
+        return process.env;
+      }
+      return voiceModelLibrary.getRuntimeEnv(process.env);
+    },
+  });
+  await nanobotRuntimeManager.init();
+  chatBackendManager = createChatBackendManager({
+    backends: [
+      new OpenClawBackendAdapter(),
+      new NanobotBackendAdapter({
+        resolveRuntime: () => nanobotRuntimeManager.resolveLaunchConfig(),
+      }),
+    ],
+  });
   registerModelProtocol();
 
-  registerSettingsIpc({ ipcMain, settingsStore });
+  registerSettingsIpc({ ipcMain, settingsStore, backendManager: chatBackendManager });
 
   windowModeManager = new WindowModeManager();
 
@@ -260,6 +285,10 @@ async function bootstrap() {
     getWindow: () => mainWindow,
     modelLibrary: live2dModelLibrary,
   });
+  disposeNanobotRuntimeHandlers = registerNanobotRuntimeIpc({
+    ipcMain,
+    nanobotRuntimeManager,
+  });
   disposeVoiceModelsHandlers = registerVoiceModelsIpc({
     ipcMain,
     voiceModelLibrary,
@@ -274,6 +303,7 @@ async function bootstrap() {
   const chatStreamControl = registerChatStreamIpc({
     ipcMain,
     getSettings: () => settingsStore.getForMain(),
+    backendManager: chatBackendManager,
     emitEvent: (payload) => {
       if (!mainWindow || mainWindow.isDestroyed()) {
         return;
@@ -373,12 +403,20 @@ app.on('before-quit', () => {
   if (disposeLive2DModelsHandlers) {
     disposeLive2DModelsHandlers();
   }
+  if (disposeNanobotRuntimeHandlers) {
+    disposeNanobotRuntimeHandlers();
+  }
   if (disposeVoiceModelsHandlers) {
     disposeVoiceModelsHandlers();
   }
   if (disposeVoiceSessionHandlers) {
     disposeVoiceSessionHandlers();
   }
+  if (chatBackendManager) {
+    void chatBackendManager.dispose();
+    chatBackendManager = null;
+  }
+  nanobotRuntimeManager = null;
 
   ipcMain.removeHandler('window:get-platform');
   ipcMain.removeHandler('window:control');

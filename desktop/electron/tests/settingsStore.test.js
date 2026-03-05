@@ -5,11 +5,20 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { SettingsStore } = require('../services/settingsStore');
+const { OPENCLAW_ACCOUNT_NAME, NANOBOT_ACCOUNT_NAME } = require('../services/secretStore');
 
 class FakeSecretStore {
-  constructor({ available = true, token = null, throwOnGet = false, throwOnSet = false, throwOnDelete = false } = {}) {
+  constructor({
+    available = true,
+    secrets = {},
+    throwOnGet = false,
+    throwOnSet = false,
+    throwOnDelete = false,
+  } = {}) {
     this.available = available;
-    this.token = token;
+    this.secrets = {
+      ...secrets,
+    };
     this.throwOnGet = throwOnGet;
     this.throwOnSet = throwOnSet;
     this.throwOnDelete = throwOnDelete;
@@ -19,34 +28,32 @@ class FakeSecretStore {
     return this.available;
   }
 
-  async getToken() {
+  async getSecret(accountName) {
     if (this.throwOnGet) {
       throw new Error('secure_get_failed');
     }
-    return this.token;
+    return this.secrets[accountName] || null;
   }
 
-  async setToken(token) {
+  async setSecret(accountName, value) {
     if (this.throwOnSet) {
       throw new Error('secure_set_failed');
     }
     if (!this.available) {
       return false;
     }
-
-    this.token = token;
+    this.secrets[accountName] = value;
     return true;
   }
 
-  async deleteToken() {
+  async deleteSecret(accountName) {
     if (this.throwOnDelete) {
       throw new Error('secure_delete_failed');
     }
     if (!this.available) {
       return false;
     }
-
-    this.token = null;
+    delete this.secrets[accountName];
     return true;
   }
 }
@@ -72,89 +79,224 @@ async function setupTempStore({ fileContent, secretStore } = {}) {
   };
 }
 
-test('migrates legacy token from settings file into secret store', async () => {
-  const secretStore = new FakeSecretStore({ available: true, token: null });
+test('migrates legacy openclaw token and settings shape', async () => {
+  const secretStore = new FakeSecretStore({ available: true });
   const { store, tmpDir } = await setupTempStore({
     fileContent: {
       baseUrl: 'http://127.0.0.1:18789',
       agentId: 'main',
-      token: 'legacy-token',
+      token: 'legacy-openclaw-token',
     },
     secretStore,
   });
 
-  const publicSettings = store.getPublic();
-  assert.equal(publicSettings.hasToken, true);
-  assert.equal(publicSettings.hasSecureStorage, true);
+  const mainSettings = store.getForMain();
+  assert.equal(mainSettings.chatBackend, 'openclaw');
+  assert.equal(mainSettings.openclaw.baseUrl, 'http://127.0.0.1:18789');
+  assert.equal(mainSettings.openclaw.agentId, 'main');
+  assert.equal(mainSettings.openclaw.token, 'legacy-openclaw-token');
+  assert.equal(mainSettings.token, 'legacy-openclaw-token');
+  assert.equal(secretStore.secrets[OPENCLAW_ACCOUNT_NAME], 'legacy-openclaw-token');
 
   const fileRaw = await fs.readFile(path.join(tmpDir, 'openclaw-settings.json'), 'utf-8');
   const persisted = JSON.parse(fileRaw);
+  assert.equal(persisted.chatBackend, 'openclaw');
   assert.equal(Object.prototype.hasOwnProperty.call(persisted, 'token'), false);
-
-  assert.equal(store.getForMain().token, 'legacy-token');
-  assert.equal(secretStore.token, 'legacy-token');
+  assert.equal(Object.prototype.hasOwnProperty.call(persisted.openclaw, 'token'), false);
 });
 
-test('falls back to plain token when secure storage is unavailable', async () => {
-  const secretStore = new FakeSecretStore({ available: false, token: null });
+test('migrates legacy nanobot api key into secure storage', async () => {
+  const secretStore = new FakeSecretStore({ available: true });
   const { store, tmpDir } = await setupTempStore({
+    fileContent: {
+      chatBackend: 'nanobot',
+      openclaw: {
+        baseUrl: 'http://127.0.0.1:18789',
+        agentId: 'main',
+      },
+      nanobot: {
+        enabled: true,
+        provider: 'openrouter',
+        model: 'anthropic/claude-opus-4-5',
+        apiKey: 'legacy-nanobot-api-key',
+      },
+    },
     secretStore,
   });
 
-  await store.save({ token: 'plain-token' });
-
-  const publicSettings = store.getPublic();
-  assert.equal(publicSettings.hasToken, true);
-  assert.equal(publicSettings.hasSecureStorage, false);
+  const mainSettings = store.getForMain();
+  assert.equal(mainSettings.chatBackend, 'nanobot');
+  assert.equal(mainSettings.nanobot.enabled, true);
+  assert.equal(mainSettings.nanobot.apiKey, 'legacy-nanobot-api-key');
+  assert.equal(secretStore.secrets[NANOBOT_ACCOUNT_NAME], 'legacy-nanobot-api-key');
 
   const fileRaw = await fs.readFile(path.join(tmpDir, 'openclaw-settings.json'), 'utf-8');
   const persisted = JSON.parse(fileRaw);
-  assert.equal(persisted.token, 'plain-token');
+  assert.equal(Object.prototype.hasOwnProperty.call(persisted.nanobot, 'apiKey'), false);
 });
 
-test('preserves stored token when save payload does not include token', async () => {
-  const secretStore = new FakeSecretStore({ available: true, token: 'saved-token' });
+test('falls back to plain text secrets when secure storage is unavailable', async () => {
+  const secretStore = new FakeSecretStore({ available: false });
+  const { store, tmpDir } = await setupTempStore({ secretStore });
+
+  await store.save({
+    chatBackend: 'nanobot',
+    openclaw: {
+      baseUrl: 'http://localhost:3001',
+      agentId: 'agent-x',
+      token: 'plain-openclaw-token',
+    },
+    nanobot: {
+      enabled: true,
+      workspace: '/tmp/nanobot-workspace',
+      provider: 'openrouter',
+      model: 'anthropic/claude-opus-4-5',
+      apiKey: 'plain-nanobot-api-key',
+    },
+  });
+
+  const publicSettings = store.getPublic();
+  assert.equal(publicSettings.chatBackend, 'nanobot');
+  assert.equal(publicSettings.hasSecureStorage, false);
+  assert.equal(publicSettings.hasToken, true);
+  assert.equal(publicSettings.nanobot.hasApiKey, true);
+
+  const fileRaw = await fs.readFile(path.join(tmpDir, 'openclaw-settings.json'), 'utf-8');
+  const persisted = JSON.parse(fileRaw);
+  assert.equal(persisted.openclaw.token, 'plain-openclaw-token');
+  assert.equal(persisted.nanobot.apiKey, 'plain-nanobot-api-key');
+});
+
+test('preserves tokens when save payload omits tokens', async () => {
+  const secretStore = new FakeSecretStore({
+    available: true,
+    secrets: {
+      [OPENCLAW_ACCOUNT_NAME]: 'saved-openclaw-token',
+      [NANOBOT_ACCOUNT_NAME]: 'saved-nanobot-api-key',
+    },
+  });
   const { store } = await setupTempStore({
     fileContent: {
-      baseUrl: 'http://127.0.0.1:18789',
-      agentId: 'main',
+      chatBackend: 'nanobot',
+      openclaw: {
+        baseUrl: 'http://127.0.0.1:18789',
+        agentId: 'main',
+      },
+      nanobot: {
+        enabled: true,
+        provider: 'openrouter',
+        model: 'anthropic/claude-opus-4-5',
+      },
     },
     secretStore,
   });
 
-  await store.save({ baseUrl: 'http://localhost:3001', agentId: 'agent-x' });
+  await store.save({
+    openclaw: {
+      baseUrl: 'http://localhost:9001',
+      agentId: 'agent-y',
+    },
+    nanobot: {
+      model: 'openai/gpt-4.1',
+      temperature: 0.4,
+    },
+  });
 
-  assert.equal(store.getForMain().token, 'saved-token');
-  assert.equal(store.getForMain().baseUrl, 'http://localhost:3001');
-  assert.equal(store.getForMain().agentId, 'agent-x');
+  const mainSettings = store.getForMain();
+  assert.equal(mainSettings.openclaw.token, 'saved-openclaw-token');
+  assert.equal(mainSettings.nanobot.apiKey, 'saved-nanobot-api-key');
+  assert.equal(mainSettings.openclaw.baseUrl, 'http://localhost:9001');
+  assert.equal(mainSettings.nanobot.model, 'openai/gpt-4.1');
 });
 
-test('clears stored token explicitly', async () => {
-  const secretStore = new FakeSecretStore({ available: true, token: 'saved-token' });
+test('clears openclaw and nanobot secrets explicitly', async () => {
+  const secretStore = new FakeSecretStore({
+    available: true,
+    secrets: {
+      [OPENCLAW_ACCOUNT_NAME]: 'saved-openclaw-token',
+      [NANOBOT_ACCOUNT_NAME]: 'saved-nanobot-api-key',
+    },
+  });
   const { store } = await setupTempStore({ secretStore });
 
-  await store.save({ clearToken: true });
+  await store.save({
+    clearToken: true,
+    clearNanobotApiKey: true,
+  });
 
-  assert.equal(store.getPublic().hasToken, false);
-  assert.equal(store.getForMain().token, '');
-  assert.equal(secretStore.token, null);
+  const publicSettings = store.getPublic();
+  assert.equal(publicSettings.hasToken, false);
+  assert.equal(publicSettings.nanobot.hasApiKey, false);
+  assert.equal(store.getForMain().openclaw.token, '');
+  assert.equal(store.getForMain().nanobot.apiKey, '');
+  assert.equal(secretStore.secrets[OPENCLAW_ACCOUNT_NAME], undefined);
+  assert.equal(secretStore.secrets[NANOBOT_ACCOUNT_NAME], undefined);
+});
+
+test('merge applies backend-specific override payload', async () => {
+  const secretStore = new FakeSecretStore({
+    available: true,
+    secrets: {
+      [OPENCLAW_ACCOUNT_NAME]: 'saved-openclaw-token',
+      [NANOBOT_ACCOUNT_NAME]: 'saved-nanobot-api-key',
+    },
+  });
+  const { store } = await setupTempStore({
+    fileContent: {
+      chatBackend: 'openclaw',
+      openclaw: {
+        baseUrl: 'http://127.0.0.1:18789',
+        agentId: 'main',
+      },
+      nanobot: {
+        enabled: false,
+        provider: 'openrouter',
+        model: 'anthropic/claude-opus-4-5',
+      },
+    },
+    secretStore,
+  });
+
+  const merged = store.merge({
+    chatBackend: 'nanobot',
+    openclaw: {
+      token: 'override-openclaw-token',
+    },
+    nanobot: {
+      enabled: true,
+      provider: 'openrouter',
+      model: 'openai/gpt-4.1',
+      apiKey: 'override-nanobot-api-key',
+    },
+  });
+
+  assert.equal(merged.chatBackend, 'nanobot');
+  assert.equal(merged.openclaw.token, 'override-openclaw-token');
+  assert.equal(merged.nanobot.enabled, true);
+  assert.equal(merged.nanobot.model, 'openai/gpt-4.1');
+  assert.equal(merged.nanobot.apiKey, 'override-nanobot-api-key');
 });
 
 test('falls back when secure storage throws at runtime', async () => {
   const secretStore = new FakeSecretStore({
     available: true,
-    token: null,
     throwOnGet: true,
     throwOnSet: true,
   });
   const { store, tmpDir } = await setupTempStore({ secretStore });
 
-  await store.save({ token: 'fallback-token' });
+  await store.save({
+    openclaw: { token: 'fallback-openclaw-token' },
+    nanobot: { apiKey: 'fallback-nanobot-api-key' },
+  });
 
-  assert.equal(store.getPublic().hasSecureStorage, false);
-  assert.equal(store.getForMain().token, 'fallback-token');
+  const publicSettings = store.getPublic();
+  assert.equal(publicSettings.hasSecureStorage, false);
+  assert.equal(store.getForMain().openclaw.token, 'fallback-openclaw-token');
+  assert.equal(store.getForMain().nanobot.apiKey, 'fallback-nanobot-api-key');
 
   const fileRaw = await fs.readFile(path.join(tmpDir, 'openclaw-settings.json'), 'utf-8');
   const persisted = JSON.parse(fileRaw);
-  assert.equal(persisted.token, 'fallback-token');
+  assert.equal(persisted.openclaw.token, 'fallback-openclaw-token');
+  assert.equal(persisted.nanobot.apiKey, 'fallback-nanobot-api-key');
 });

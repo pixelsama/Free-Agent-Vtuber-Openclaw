@@ -1,5 +1,6 @@
 const SERVICE_NAME = 'free-agent-vtuber-openclaw';
-const ACCOUNT_NAME = 'openclaw-token';
+const OPENCLAW_ACCOUNT_NAME = 'openclaw-token';
+const NANOBOT_ACCOUNT_NAME = 'nanobot-api-key';
 
 class KeytarSecretStore {
   constructor() {
@@ -29,37 +30,66 @@ class KeytarSecretStore {
     return this.keytar;
   }
 
-  async getToken() {
+  async getSecret(accountName) {
+    const account = typeof accountName === 'string' ? accountName.trim() : '';
+    if (!account) {
+      return null;
+    }
+
     const keytar = this.loadKeytar();
     if (!keytar) {
       return null;
     }
 
-    const token = await keytar.getPassword(SERVICE_NAME, ACCOUNT_NAME);
+    const token = await keytar.getPassword(SERVICE_NAME, account);
     return token || null;
   }
 
-  async setToken(token) {
+  async setSecret(accountName, value) {
+    const account = typeof accountName === 'string' ? accountName.trim() : '';
+    if (!account) {
+      return false;
+    }
+
     const keytar = this.loadKeytar();
     if (!keytar) {
       return false;
     }
 
-    await keytar.setPassword(SERVICE_NAME, ACCOUNT_NAME, token);
+    await keytar.setPassword(SERVICE_NAME, account, value);
     return true;
   }
 
-  async deleteToken() {
+  async deleteSecret(accountName) {
+    const account = typeof accountName === 'string' ? accountName.trim() : '';
+    if (!account) {
+      return false;
+    }
+
     const keytar = this.loadKeytar();
     if (!keytar) {
       return false;
     }
 
-    await keytar.deletePassword(SERVICE_NAME, ACCOUNT_NAME);
+    await keytar.deletePassword(SERVICE_NAME, account);
     return true;
+  }
+
+  async getToken() {
+    return this.getSecret(OPENCLAW_ACCOUNT_NAME);
+  }
+
+  async setToken(token) {
+    return this.setSecret(OPENCLAW_ACCOUNT_NAME, token);
+  }
+
+  async deleteToken() {
+    return this.deleteSecret(OPENCLAW_ACCOUNT_NAME);
   }
 }
 
 module.exports = {
+  OPENCLAW_ACCOUNT_NAME,
+  NANOBOT_ACCOUNT_NAME,
   KeytarSecretStore,
 };

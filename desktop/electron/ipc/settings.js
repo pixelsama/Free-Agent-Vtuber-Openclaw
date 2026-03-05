@@ -1,6 +1,6 @@
-const { testOpenClawConnection, toClientError } = require('../services/openclawClient');
+const { createChatBackendManager } = require('../services/chat/backendManager');
 
-function registerSettingsIpc({ ipcMain, settingsStore }) {
+function registerSettingsIpc({ ipcMain, settingsStore, backendManager = createChatBackendManager() }) {
   ipcMain.handle('settings:get', async () => settingsStore.getPublic());
 
   ipcMain.handle('settings:save', async (_event, partialSettings = {}) => {
@@ -8,13 +8,23 @@ function registerSettingsIpc({ ipcMain, settingsStore }) {
   });
 
   ipcMain.handle('settings:test', async (_event, overrideSettings = {}) => {
+    let backend = 'openclaw';
+
     try {
       const settings = settingsStore.merge(overrideSettings);
-      return await testOpenClawConnection({ settings });
+      backend = backendManager.resolveBackendName({
+        settings,
+        requestBackend: overrideSettings?.backend || overrideSettings?.chatBackend,
+      });
+
+      return await backendManager.testConnection({
+        backend,
+        settings,
+      });
     } catch (error) {
       return {
         ok: false,
-        error: toClientError(error),
+        error: backendManager.mapError(error, { backend }),
       };
     }
   });

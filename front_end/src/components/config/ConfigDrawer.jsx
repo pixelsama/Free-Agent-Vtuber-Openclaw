@@ -7,6 +7,7 @@ import {
   Divider,
   Drawer,
   IconButton,
+  MenuItem,
   Stack,
   Tab,
   Tabs,
@@ -40,19 +41,31 @@ export default function ConfigDrawer({
   onModelChange,
   onMotionsUpdate,
   onExpressionsUpdate,
-  openClawSettings,
+  chatBackendSettings = {},
   settingsSaving = false,
   settingsTesting = false,
   settingsFeedback = '',
   settingsError = '',
+  onChatBackendChange,
   onOpenClawSettingChange,
-  onSaveOpenClawSettings,
-  onTestOpenClawSettings,
+  onNanobotSettingChange,
+  onSaveChatBackendSettings,
+  onTestChatBackendSettings,
   onClearSavedToken,
+  nanobotRuntimeStatus = {},
+  nanobotRuntimeInstalling = false,
+  onInstallNanobotRuntime,
 }) {
   const { language, setLanguage, t } = useI18n();
   const { themeMode, setThemeMode } = useThemeMode();
   const [activeConfigTab, setActiveConfigTab] = useState(0);
+  const selectedBackend = chatBackendSettings?.chatBackend === 'nanobot' ? 'nanobot' : 'openclaw';
+  const openClawSettings = chatBackendSettings?.openclaw || {};
+  const nanobotSettings = chatBackendSettings?.nanobot || {};
+  const hasSecureStorage = chatBackendSettings?.hasSecureStorage !== false;
+  const hasBackendSecret = selectedBackend === 'nanobot' ? nanobotSettings.hasApiKey : openClawSettings.hasToken;
+  const nanobotRuntimeInstalled = Boolean(nanobotRuntimeStatus?.installed);
+  const nanobotRuntimePath = nanobotRuntimeStatus?.repoPath || '';
 
   useEffect(() => {
     if (!open) {
@@ -92,7 +105,7 @@ export default function ConfigDrawer({
           <Stack spacing={2}>
             <Tabs value={activeConfigTab} onChange={(_event, tab) => setActiveConfigTab(tab)} variant="fullWidth">
               <Tab label={t('app.tab.live2d')} />
-              <Tab label={t('app.tab.openclaw')} />
+              <Tab label={t('app.tab.chatBackend')} />
               <Tab label={t('app.tab.voice')} />
               <Tab label={t('app.tab.preferences')} />
             </Tabs>
@@ -138,47 +151,172 @@ export default function ConfigDrawer({
               <Stack spacing={2}>
                 {!desktopMode && <Alert severity="warning">{t('app.webModeWarning')}</Alert>}
 
-                {desktopMode && !openClawSettings.hasSecureStorage && (
+                {desktopMode && !hasSecureStorage && (
                   <Alert severity="warning">{t('app.keychainWarning')}</Alert>
                 )}
 
                 <TextField
-                  label="OpenClaw Base URL"
-                  value={openClawSettings.baseUrl}
-                  onChange={(event) => onOpenClawSettingChange?.('baseUrl', event.target.value)}
-                  placeholder="http://127.0.0.1:18789"
+                  select
+                  label={t('app.chatBackendSelector')}
+                  value={selectedBackend}
+                  onChange={(event) => onChatBackendChange?.(event.target.value)}
                   fullWidth
-                />
+                >
+                  <MenuItem value="openclaw">{t('app.backend.openclaw')}</MenuItem>
+                  <MenuItem value="nanobot">{t('app.backend.nanobot')}</MenuItem>
+                </TextField>
 
-                <TextField
-                  label="OpenClaw Token"
-                  value={openClawSettings.token}
-                  onChange={(event) => onOpenClawSettingChange?.('token', event.target.value)}
-                  type="password"
-                  autoComplete="off"
-                  placeholder={openClawSettings.hasToken ? t('app.tokenSavedPlaceholder') : ''}
-                  fullWidth
-                />
+                {selectedBackend === 'openclaw' && (
+                  <>
+                    <TextField
+                      label="OpenClaw Base URL"
+                      value={openClawSettings.baseUrl || ''}
+                      onChange={(event) => onOpenClawSettingChange?.('baseUrl', event.target.value)}
+                      placeholder="http://127.0.0.1:18789"
+                      fullWidth
+                    />
 
-                <TextField
-                  label="OpenClaw Agent ID"
-                  value={openClawSettings.agentId}
-                  onChange={(event) => onOpenClawSettingChange?.('agentId', event.target.value)}
-                  placeholder="main"
-                  fullWidth
-                />
+                    <TextField
+                      label="OpenClaw Token"
+                      value={openClawSettings.token || ''}
+                      onChange={(event) => onOpenClawSettingChange?.('token', event.target.value)}
+                      type="password"
+                      autoComplete="off"
+                      placeholder={openClawSettings.hasToken ? t('app.tokenSavedPlaceholder') : ''}
+                      fullWidth
+                    />
+
+                    <TextField
+                      label="OpenClaw Agent ID"
+                      value={openClawSettings.agentId || ''}
+                      onChange={(event) => onOpenClawSettingChange?.('agentId', event.target.value)}
+                      placeholder="main"
+                      fullWidth
+                    />
+                  </>
+                )}
+
+                {selectedBackend === 'nanobot' && (
+                  <>
+                    {desktopMode && !nanobotRuntimeInstalled && (
+                      <Alert
+                        severity="warning"
+                        action={(
+                          <Button
+                            color="inherit"
+                            size="small"
+                            disabled={nanobotRuntimeInstalling}
+                            onClick={onInstallNanobotRuntime}
+                          >
+                            {nanobotRuntimeInstalling ? t('app.nanobotRuntimeInstalling') : t('app.nanobotRuntimeInstall')}
+                          </Button>
+                        )}
+                      >
+                        {t('app.nanobotRuntimeMissing')}
+                      </Alert>
+                    )}
+
+                    {desktopMode && nanobotRuntimeInstalled && (
+                      <Alert severity="success">
+                        {t('app.nanobotRuntimeReady', { path: nanobotRuntimePath })}
+                      </Alert>
+                    )}
+
+                    <TextField
+                      select
+                      label={t('app.nanobotEnabled')}
+                      value={nanobotSettings.enabled ? 'true' : 'false'}
+                      onChange={(event) => onNanobotSettingChange?.('enabled', event.target.value === 'true')}
+                      fullWidth
+                    >
+                      <MenuItem value="true">{t('common.enabled')}</MenuItem>
+                      <MenuItem value="false">{t('common.disabled')}</MenuItem>
+                    </TextField>
+
+                    <TextField
+                      label={t('app.nanobotWorkspace')}
+                      value={nanobotSettings.workspace || ''}
+                      onChange={(event) => onNanobotSettingChange?.('workspace', event.target.value)}
+                      fullWidth
+                    />
+
+                    <TextField
+                      label={t('app.nanobotProvider')}
+                      value={nanobotSettings.provider || ''}
+                      onChange={(event) => onNanobotSettingChange?.('provider', event.target.value)}
+                      placeholder="openrouter"
+                      fullWidth
+                    />
+
+                    <TextField
+                      label={t('app.nanobotModel')}
+                      value={nanobotSettings.model || ''}
+                      onChange={(event) => onNanobotSettingChange?.('model', event.target.value)}
+                      placeholder="anthropic/claude-opus-4-5"
+                      fullWidth
+                    />
+
+                    <TextField
+                      label={t('app.nanobotApiBase')}
+                      value={nanobotSettings.apiBase || ''}
+                      onChange={(event) => onNanobotSettingChange?.('apiBase', event.target.value)}
+                      placeholder="https://openrouter.ai/api/v1"
+                      fullWidth
+                    />
+
+                    <TextField
+                      label={t('app.nanobotApiKey')}
+                      value={nanobotSettings.apiKey || ''}
+                      onChange={(event) => onNanobotSettingChange?.('apiKey', event.target.value)}
+                      type="password"
+                      autoComplete="off"
+                      placeholder={nanobotSettings.hasApiKey ? t('app.tokenSavedPlaceholder') : ''}
+                      fullWidth
+                    />
+
+                    <Stack direction="row" spacing={1}>
+                      <TextField
+                        label={t('app.nanobotMaxTokens')}
+                        type="number"
+                        value={nanobotSettings.maxTokens ?? 4096}
+                        onChange={(event) =>
+                          onNanobotSettingChange?.('maxTokens', Number.parseInt(event.target.value, 10) || 0)
+                        }
+                        fullWidth
+                      />
+                      <TextField
+                        label={t('app.nanobotTemperature')}
+                        type="number"
+                        value={nanobotSettings.temperature ?? 0.2}
+                        onChange={(event) =>
+                          onNanobotSettingChange?.('temperature', Number.parseFloat(event.target.value))
+                        }
+                        inputProps={{ step: 0.1 }}
+                        fullWidth
+                      />
+                    </Stack>
+
+                    <TextField
+                      label={t('app.nanobotReasoningEffort')}
+                      value={nanobotSettings.reasoningEffort || ''}
+                      onChange={(event) => onNanobotSettingChange?.('reasoningEffort', event.target.value)}
+                      placeholder="low / medium / high"
+                      fullWidth
+                    />
+                  </>
+                )}
 
                 <Stack direction="row" spacing={1}>
                   <Button
                     variant="contained"
-                    onClick={onSaveOpenClawSettings}
+                    onClick={onSaveChatBackendSettings}
                     disabled={settingsSaving || settingsTesting}
                   >
                     {settingsSaving ? t('app.savingSettings') : t('app.saveSettings')}
                   </Button>
                   <Button
                     variant="outlined"
-                    onClick={onTestOpenClawSettings}
+                    onClick={onTestChatBackendSettings}
                     disabled={settingsSaving || settingsTesting}
                   >
                     {settingsTesting ? t('app.testingConnection') : t('app.connectionTest')}
@@ -187,7 +325,7 @@ export default function ConfigDrawer({
                     variant="text"
                     color="warning"
                     onClick={onClearSavedToken}
-                    disabled={settingsSaving || settingsTesting || !openClawSettings.hasToken}
+                    disabled={settingsSaving || settingsTesting || !hasBackendSecret}
                   >
                     {t('app.clearToken')}
                   </Button>
