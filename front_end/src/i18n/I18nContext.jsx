@@ -20,6 +20,7 @@ const MESSAGES = {
     'common.delete': '删除',
     'common.enabled': '启用',
     'common.disabled': '禁用',
+    'common.auto': '自动',
 
     'error.openclawMissingConfig': '请先填写 OpenClaw Base URL / Token / Agent ID。',
     'error.openclawUnreachable': '无法访问 OpenClaw。',
@@ -223,6 +224,7 @@ const MESSAGES = {
     'common.delete': 'Delete',
     'common.enabled': 'Enabled',
     'common.disabled': 'Disabled',
+    'common.auto': 'Auto',
 
     'error.openclawMissingConfig': 'Please fill OpenClaw Base URL / Token / Agent ID first.',
     'error.openclawUnreachable': 'Unable to reach OpenClaw.',

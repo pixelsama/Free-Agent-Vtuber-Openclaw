@@ -298,12 +298,17 @@ export default function ConfigDrawer({
                     </Stack>
 
                     <TextField
+                      select
                       label={t('app.nanobotReasoningEffort')}
                       value={nanobotSettings.reasoningEffort || ''}
                       onChange={(event) => onNanobotSettingChange?.('reasoningEffort', event.target.value)}
-                      placeholder="low / medium / high"
                       fullWidth
-                    />
+                    >
+                      <MenuItem value="">{t('common.auto')}</MenuItem>
+                      <MenuItem value="low">low</MenuItem>
+                      <MenuItem value="medium">medium</MenuItem>
+                      <MenuItem value="high">high</MenuItem>
+                    </TextField>
                   </>
                 )}
 
