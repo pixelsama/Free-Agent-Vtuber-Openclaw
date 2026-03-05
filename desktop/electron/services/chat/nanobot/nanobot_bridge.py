@@ -200,13 +200,16 @@ async def handle_start(request_id: str, session_id: str, content: str, config: d
             raise BridgeError("nanobot_missing_config", "Nanobot API Key is required.")
 
         agent = get_or_create_agent(normalized)
-        progress_segments: list[str] = []
 
-        async def on_progress(text: str, **_kwargs: Any) -> None:
-            chunk = normalize_string(text)
-            if not chunk:
-                return
-            progress_segments.append(chunk)
+        response = await agent.process_direct(
+            content=content,
+            session_key=f"desktop:{session_id or 'default'}",
+            channel="desktop",
+            chat_id=session_id or "default",
+        )
+
+        final_text = normalize_string(response)
+        if final_text:
             emit(
                 {
                     "type": "event",
@@ -214,38 +217,12 @@ async def handle_start(request_id: str, session_id: str, content: str, config: d
                     "event": {
                         "type": "text-delta",
                         "payload": {
-                            "content": chunk,
+                            "content": final_text,
                             "source": "nanobot",
                         },
                     },
                 }
             )
-
-        response = await agent.process_direct(
-            content=content,
-            session_key=f"desktop:{session_id or 'default'}",
-            channel="desktop",
-            chat_id=session_id or "default",
-            on_progress=on_progress,
-        )
-
-        final_text = normalize_string(response)
-        if final_text:
-            tail = progress_segments[-1] if progress_segments else ""
-            if final_text != tail:
-                emit(
-                    {
-                        "type": "event",
-                        "requestId": request_id,
-                        "event": {
-                            "type": "text-delta",
-                            "payload": {
-                                "content": final_text,
-                                "source": "nanobot",
-                            },
-                        },
-                    }
-                )
 
         emit(
             {
