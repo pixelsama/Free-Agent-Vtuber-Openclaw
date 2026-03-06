@@ -157,7 +157,7 @@ test('listCatalog returns built-in model items', async () => {
   assert.ok(catalog.length >= 4);
   assert.ok(catalog.some((item) => item.id === 'builtin-asr-zh-int8-zipformer-v1'));
   assert.ok(catalog.some((item) => item.id === 'builtin-asr-qwen3-0.6b-4bit-v1'));
-  assert.ok(catalog.some((item) => item.id === 'builtin-tts-qwen3-0.6b-4bit-v1'));
+  assert.ok(catalog.some((item) => item.id === 'builtin-tts-qwen3-0.6b-8bit-v1'));
   assert.ok(catalog.some((item) => item.id === 'builtin-tts-edge-v1'));
 });
 

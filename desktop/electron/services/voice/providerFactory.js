@@ -128,6 +128,7 @@ function buildPythonTtsOptionsFromEnv(env = process.env) {
   return {
     pythonExecutable: env.VOICE_PYTHON_EXECUTABLE || env.VOICE_PYTHON_BIN,
     bridgeScriptPath: env.VOICE_PYTHON_BRIDGE_SCRIPT,
+    workerScriptPath: env.VOICE_TTS_PYTHON_WORKER_SCRIPT,
     engine: env.VOICE_TTS_PYTHON_ENGINE,
     modelDir: env.VOICE_TTS_PYTHON_MODEL_DIR || env.VOICE_TTS_PYTHON_MODEL,
     tokenizerDir: env.VOICE_TTS_PYTHON_TOKENIZER_DIR,
@@ -140,6 +141,10 @@ function buildPythonTtsOptionsFromEnv(env = process.env) {
     edgePitch: env.VOICE_TTS_PYTHON_EDGE_PITCH,
     edgeVolume: env.VOICE_TTS_PYTHON_EDGE_VOLUME,
     device: env.VOICE_TTS_PYTHON_DEVICE || env.VOICE_PYTHON_DEVICE,
+    stream: env.VOICE_TTS_PYTHON_STREAM,
+    streamingInterval: env.VOICE_TTS_PYTHON_STREAMING_INTERVAL,
+    temperature: env.VOICE_TTS_PYTHON_TEMPERATURE,
+    disableResidentWorker: env.VOICE_TTS_PYTHON_DISABLE_RESIDENT_WORKER,
     chunkMs: env.VOICE_TTS_PYTHON_CHUNK_MS,
     timeoutMs: env.VOICE_TTS_PYTHON_TIMEOUT_MS,
   };

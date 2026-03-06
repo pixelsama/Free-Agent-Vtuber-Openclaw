@@ -6,6 +6,7 @@ const {
   buildSherpaOnnxTtsOptionsFromEnv,
   buildPythonTtsOptionsFromEnv,
 } = require('../services/voice/providerFactory');
+const { createPythonTtsProvider } = require('../services/voice/providers/tts/pythonProvider');
 const {
   createSherpaOnnxTtsProvider,
   createDefaultTtsConfig,
@@ -51,6 +52,7 @@ test('buildPythonTtsOptionsFromEnv maps env values', () => {
   const options = buildPythonTtsOptionsFromEnv({
     VOICE_PYTHON_EXECUTABLE: '/tmp/python',
     VOICE_PYTHON_BRIDGE_SCRIPT: '/tmp/bridge.py',
+    VOICE_TTS_PYTHON_WORKER_SCRIPT: '/tmp/tts_worker.py',
     VOICE_TTS_PYTHON_ENGINE: 'qwen3-mlx',
     VOICE_TTS_PYTHON_MODEL_DIR: '/tmp/tts',
     VOICE_TTS_PYTHON_TOKENIZER_DIR: '/tmp/tokenizer',
@@ -62,12 +64,17 @@ test('buildPythonTtsOptionsFromEnv maps env values', () => {
     VOICE_TTS_PYTHON_EDGE_PITCH: '+0Hz',
     VOICE_TTS_PYTHON_EDGE_VOLUME: '+0%',
     VOICE_PYTHON_DEVICE: 'cpu',
+    VOICE_TTS_PYTHON_STREAM: '1',
+    VOICE_TTS_PYTHON_STREAMING_INTERVAL: '0.4',
+    VOICE_TTS_PYTHON_TEMPERATURE: '0.9',
+    VOICE_TTS_PYTHON_DISABLE_RESIDENT_WORKER: '0',
     VOICE_TTS_PYTHON_CHUNK_MS: '80',
     VOICE_TTS_PYTHON_TIMEOUT_MS: '120000',
   });
 
   assert.equal(options.pythonExecutable, '/tmp/python');
   assert.equal(options.bridgeScriptPath, '/tmp/bridge.py');
+  assert.equal(options.workerScriptPath, '/tmp/tts_worker.py');
   assert.equal(options.engine, 'qwen3-mlx');
   assert.equal(options.modelDir, '/tmp/tts');
   assert.equal(options.tokenizerDir, '/tmp/tokenizer');
@@ -79,6 +86,10 @@ test('buildPythonTtsOptionsFromEnv maps env values', () => {
   assert.equal(options.edgePitch, '+0Hz');
   assert.equal(options.edgeVolume, '+0%');
   assert.equal(options.device, 'cpu');
+  assert.equal(options.stream, '1');
+  assert.equal(options.streamingInterval, '0.4');
+  assert.equal(options.temperature, '0.9');
+  assert.equal(options.disableResidentWorker, '0');
   assert.equal(options.chunkMs, '80');
   assert.equal(options.timeoutMs, '120000');
 });
@@ -108,6 +119,170 @@ test('createTtsProvider accepts python provider selection', () => {
   });
 
   assert.equal(typeof provider.synthesize, 'function');
+});
+
+test('python tts provider streams qwen3 mlx chunks through resident worker', async () => {
+  const commands = [];
+  let spawnCount = 0;
+
+  const createFakeChild = () => {
+    const listeners = new Map();
+    const stdoutListeners = [];
+    const stderrListeners = [];
+    const child = {
+      stdout: {
+        on(event, handler) {
+          if (event === 'data') {
+            stdoutListeners.push(handler);
+          }
+        },
+      },
+      stderr: {
+        on(event, handler) {
+          if (event === 'data') {
+            stderrListeners.push(handler);
+          }
+        },
+      },
+      stdin: {
+        destroyed: false,
+        write(chunk, _encoding, callback) {
+          const payload = JSON.parse(String(chunk).trim());
+          commands.push(payload);
+
+          if (payload.type === 'synthesize') {
+            const sampleRate = 24000;
+            const chunkA = Buffer.from([0, 1, 2, 3]);
+            const chunkB = Buffer.from([4, 5, 6, 7]);
+            setImmediate(() => {
+              for (const handler of stdoutListeners) {
+                handler(
+                  Buffer.from(
+                    `__TTS_JSON__${JSON.stringify({
+                      type: 'chunk',
+                      requestId: payload.requestId,
+                      sampleRate,
+                      pcmS16LeBase64: chunkA.toString('base64'),
+                    })}\n`,
+                    'utf-8',
+                  ),
+                );
+              }
+              for (const handler of stdoutListeners) {
+                handler(
+                  Buffer.from(
+                    `__TTS_JSON__${JSON.stringify({
+                      type: 'chunk',
+                      requestId: payload.requestId,
+                      sampleRate,
+                      pcmS16LeBase64: chunkB.toString('base64'),
+                    })}\n`,
+                    'utf-8',
+                  ),
+                );
+              }
+              for (const handler of stdoutListeners) {
+                handler(
+                  Buffer.from(
+                    `__TTS_JSON__${JSON.stringify({
+                      type: 'result',
+                      requestId: payload.requestId,
+                      sampleRate,
+                      sampleCount: 4,
+                    })}\n`,
+                    'utf-8',
+                  ),
+                );
+              }
+            });
+          }
+
+          if (payload.type === 'shutdown') {
+            setImmediate(() => {
+              const exitHandlers = listeners.get('exit') || [];
+              for (const handler of exitHandlers) {
+                handler(0, null);
+              }
+            });
+          }
+
+          callback?.();
+          return true;
+        },
+      },
+      killed: false,
+      on(event, handler) {
+        const handlers = listeners.get(event) || [];
+        handlers.push(handler);
+        listeners.set(event, handlers);
+      },
+      kill() {
+        child.killed = true;
+      },
+    };
+
+    setImmediate(() => {
+      for (const handler of stdoutListeners) {
+        handler(
+          Buffer.from(
+            `__TTS_JSON__${JSON.stringify({
+              type: 'ready',
+              deviceUsed: 'mlx',
+            })}\n`,
+            'utf-8',
+          ),
+        );
+      }
+    });
+
+    return child;
+  };
+
+  const provider = createPythonTtsProvider({
+    options: {
+      pythonExecutable: '/tmp/python',
+      bridgeScriptPath: '/tmp/bridge.py',
+      workerScriptPath: '/tmp/tts_worker.py',
+      modelDir: '/tmp/model',
+      engine: 'qwen3-mlx',
+      speaker: 'vivian',
+      language: 'Chinese',
+      stream: '1',
+      streamingInterval: '0.4',
+      temperature: '0.9',
+    },
+    existsSync: () => true,
+    spawnFn: () => {
+      spawnCount += 1;
+      return createFakeChild();
+    },
+  });
+
+  const chunks = [];
+  const result = await provider.synthesize({
+    text: 'hello',
+    onChunk: async (chunk) => {
+      chunks.push(chunk);
+    },
+  });
+
+  assert.equal(spawnCount, 1);
+  assert.equal(chunks.length, 2);
+  assert.equal(chunks[0].codec, 'pcm_s16le');
+  assert.equal(chunks[0].sampleRate, 24000);
+  assert.deepEqual([...chunks[0].audioChunk], [0, 1, 2, 3]);
+  assert.deepEqual([...chunks[1].audioChunk], [4, 5, 6, 7]);
+  assert.equal(result.sampleRate, 24000);
+  assert.equal(result.sampleCount, 4);
+
+  await provider.synthesize({
+    text: 'hello again',
+    onChunk: async () => {},
+  });
+  assert.equal(spawnCount, 1);
+
+  await provider.dispose();
+  assert.ok(commands.some((item) => item.type === 'shutdown'));
 });
 
 test('createDefaultTtsConfig validates kokoro required paths', () => {

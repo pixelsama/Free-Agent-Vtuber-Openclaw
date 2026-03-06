@@ -58,10 +58,10 @@ const BUILT_IN_VOICE_MODEL_CATALOG = [
     },
   },
   {
-    id: 'builtin-tts-qwen3-0.6b-4bit-v1',
-    name: 'Qwen3-TTS-0.6B-4bit（MLX）',
+    id: 'builtin-tts-qwen3-0.6b-8bit-v1',
+    name: 'Qwen3-TTS-0.6B-8bit（MLX）',
     description:
-      '内置 Python 3.11 + mlx-audio + mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit（Apple Silicon 本地 TTS）',
+      '内置 Python 3.11 + mlx-audio + mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit（Apple Silicon 本地 TTS）',
     hasAsr: false,
     hasTts: true,
     runtime: {
@@ -75,7 +75,7 @@ const BUILT_IN_VOICE_MODEL_CATALOG = [
         'soundfile>=0.12.1',
       ],
       ttsEngine: 'qwen3-mlx',
-      ttsModelId: 'mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit',
+      ttsModelId: 'mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit',
       ttsMode: 'custom_voice',
       ttsSpeaker: 'vivian',
       ttsLanguage: 'Chinese',
