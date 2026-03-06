@@ -1386,23 +1386,45 @@ function registerVoiceSessionIpc({
     let chunkCount = 0;
     let totalBytes = 0;
     let observedSampleRate = 0;
+    let observedCodec = '';
     const includeAudio = Boolean(request.includeAudio);
     const collectedAudioChunks = [];
 
     const startedAt = Date.now();
     try {
+      const providerName =
+        typeof runtime.env?.VOICE_TTS_PROVIDER === 'string'
+          ? runtime.env.VOICE_TTS_PROVIDER.trim().toLowerCase()
+          : '';
+      if (!providerName || providerName === 'mock') {
+        return {
+          ok: false,
+          error: {
+            code: 'voice_tts_provider_not_configured',
+            message: '当前未配置可用的 TTS 模型。请先安装并选择一个真实 TTS 模型后再测试。',
+            stage: 'speaking',
+            retriable: false,
+          },
+          latencyMs: Math.max(0, Date.now() - startedAt),
+        };
+      }
+
       const result = await runtime.ttsService.synthesize({
         text,
         signal: controller.signal,
-        onChunk: async ({ audioChunk, sampleRate }) => {
+        onChunk: async ({ audioChunk, sampleRate, codec }) => {
           const chunk = cloneBinaryChunk(audioChunk);
           if (!chunk.length) {
             return;
           }
 
+          const chunkCodec = typeof codec === 'string' ? codec.trim().toLowerCase() : '';
           chunkCount += 1;
           totalBytes += chunk.byteLength;
-          if (includeAudio) {
+          if (!observedCodec && chunkCodec) {
+            observedCodec = chunkCodec;
+          }
+          if (includeAudio && chunkCodec === 'pcm_s16le') {
             collectedAudioChunks.push(Buffer.from(chunk));
           }
           if (!firstChunkAt) {
@@ -1422,7 +1444,7 @@ function registerVoiceSessionIpc({
           ? Math.max(0, Math.round((resultSampleCount / resultSampleRate) * 1000))
           : 0;
       const pcmS16LeBase64 =
-        includeAudio && collectedAudioChunks.length > 0
+        includeAudio && observedCodec === 'pcm_s16le' && collectedAudioChunks.length > 0
           ? Buffer.concat(collectedAudioChunks).toString('base64')
           : '';
       return {
@@ -1435,8 +1457,8 @@ function registerVoiceSessionIpc({
         sampleCount: resultSampleCount || undefined,
         outputDurationMs: outputDurationMs || undefined,
         textLength: text.length,
+        codec: observedCodec || undefined,
         pcmS16LeBase64: pcmS16LeBase64 || undefined,
-        codec: pcmS16LeBase64 ? 'pcm_s16le' : undefined,
       };
     } catch (error) {
       return {

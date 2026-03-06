@@ -177,6 +177,38 @@ function resolveTtsModelPath(bundle = {}) {
   return bundle?.tts?.modelPath || bundle?.runtime?.ttsModelDir || '';
 }
 
+export function resolveCatalogSelectionFromBundle({
+  bundles = [],
+  selectedBundleId = '',
+  catalogItems = [],
+  previousCatalogId = '',
+  capability = 'tts',
+} = {}) {
+  const hasCapability = capability === 'asr' ? bundleHasAsr : bundleHasTts;
+  const normalizedBundleId = typeof selectedBundleId === 'string' ? selectedBundleId : '';
+  const normalizedPreviousCatalogId = typeof previousCatalogId === 'string' ? previousCatalogId : '';
+  const availableCatalogIds = new Set(
+    Array.isArray(catalogItems)
+      ? catalogItems
+        .map((item) => (typeof item?.id === 'string' ? item.id : ''))
+        .filter(Boolean)
+      : [],
+  );
+
+  if (normalizedBundleId) {
+    const selectedBundle = Array.isArray(bundles)
+      ? bundles.find((bundle) => bundle?.id === normalizedBundleId && hasCapability(bundle))
+      : null;
+    const bundleCatalogId =
+      typeof selectedBundle?.catalogId === 'string' ? selectedBundle.catalogId : '';
+    return bundleCatalogId && availableCatalogIds.has(bundleCatalogId) ? bundleCatalogId : '';
+  }
+
+  return normalizedPreviousCatalogId && availableCatalogIds.has(normalizedPreviousCatalogId)
+    ? normalizedPreviousCatalogId
+    : '';
+}
+
 async function captureAsrTestPcm({ durationMs = ASR_TEST_RECORD_MS, sampleRate = ASR_TEST_SAMPLE_RATE } = {}) {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
     throw new Error('当前环境不支持麦克风采集。');
@@ -338,6 +370,16 @@ export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownload
   }, [modelBundles, selectedTtsCatalogId]);
   const hasInstalledSelectedAsrCatalog = Boolean(selectedAsrCatalogId && installedAsrCatalogBundle);
   const hasInstalledSelectedTtsCatalog = Boolean(selectedTtsCatalogId && installedTtsCatalogBundle);
+  const isSelectedAsrCatalogActive = Boolean(
+    installedAsrCatalogBundle
+    && selectedAsrBundleId
+    && installedAsrCatalogBundle.id === selectedAsrBundleId,
+  );
+  const isSelectedTtsCatalogActive = Boolean(
+    installedTtsCatalogBundle
+    && selectedTtsBundleId
+    && installedTtsCatalogBundle.id === selectedTtsBundleId,
+  );
   const effectiveActiveAsrBundle =
     selectedAsrCatalogId && !hasInstalledSelectedAsrCatalog ? null : activeAsrBundle;
   const effectiveActiveTtsBundle =
@@ -419,19 +461,23 @@ export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownload
         setModelError('');
       }
       setCatalogItems(items);
-      const asrItems = items.filter((item) => item?.hasAsr);
-      const ttsItems = items.filter((item) => item?.hasTts);
       setSelectedAsrCatalogId((previous) => {
-        if (previous && asrItems.some((item) => item.id === previous)) {
-          return previous;
-        }
-        return asrItems[0]?.id || '';
+        return resolveCatalogSelectionFromBundle({
+          bundles: modelBundles,
+          selectedBundleId: selectedAsrBundleId,
+          catalogItems: items.filter((item) => item?.hasAsr),
+          previousCatalogId: previous,
+          capability: 'asr',
+        });
       });
       setSelectedTtsCatalogId((previous) => {
-        if (previous && ttsItems.some((item) => item.id === previous)) {
-          return previous;
-        }
-        return ttsItems[0]?.id || '';
+        return resolveCatalogSelectionFromBundle({
+          bundles: modelBundles,
+          selectedBundleId: selectedTtsBundleId,
+          catalogItems: items.filter((item) => item?.hasTts),
+          previousCatalogId: previous,
+          capability: 'tts',
+        });
       });
     } catch (error) {
       if (mountedRef.current) {
@@ -441,7 +487,7 @@ export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownload
         setModelError(error?.message || '读取内置模型列表失败，请重启应用后重试。');
       }
     }
-  }, [desktopMode]);
+  }, [desktopMode, modelBundles, selectedAsrBundleId, selectedTtsBundleId]);
 
   const handleRefreshModels = useCallback(async () => {
     setModelError('');
@@ -745,11 +791,13 @@ export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownload
         text,
       });
 
-      const wavBlob = createWavBlobFromPcmS16Le({
-        pcmS16LeBase64: result?.pcmS16LeBase64,
-        sampleRate: result?.sampleRate,
-        channels: 1,
-      });
+      const wavBlob = result?.codec === 'pcm_s16le'
+        ? createWavBlobFromPcmS16Le({
+          pcmS16LeBase64: result?.pcmS16LeBase64,
+          sampleRate: result?.sampleRate,
+          channels: 1,
+        })
+        : null;
       if (wavBlob) {
         const objectUrl = URL.createObjectURL(wavBlob);
         setTtsTestAudioUrl(objectUrl);
@@ -789,6 +837,23 @@ export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownload
     void loadVoiceModels();
     void loadModelCatalog();
   }, [loadModelCatalog, loadVoiceModels]);
+
+  useEffect(() => {
+    setSelectedAsrCatalogId((previous) => resolveCatalogSelectionFromBundle({
+      bundles: modelBundles,
+      selectedBundleId: selectedAsrBundleId,
+      catalogItems: asrCatalogItems,
+      previousCatalogId: previous,
+      capability: 'asr',
+    }));
+    setSelectedTtsCatalogId((previous) => resolveCatalogSelectionFromBundle({
+      bundles: modelBundles,
+      selectedBundleId: selectedTtsBundleId,
+      catalogItems: ttsCatalogItems,
+      previousCatalogId: previous,
+      capability: 'tts',
+    }));
+  }, [asrCatalogItems, modelBundles, selectedAsrBundleId, selectedTtsBundleId, ttsCatalogItems]);
 
   useEffect(() => {
     if (!desktopMode) {
@@ -932,10 +997,18 @@ export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownload
                   </Alert>
                 )}
                 {selectedAsrCatalogId ? (
-                  <Alert severity={hasInstalledSelectedAsrCatalog ? 'success' : 'warning'}>
-                    {hasInstalledSelectedAsrCatalog
-                      ? '所选 ASR 模型状态: 已下载'
-                      : '所选 ASR 模型状态: 未下载'}
+                  <Alert
+                    severity={
+                      isSelectedAsrCatalogActive
+                        ? 'success'
+                        : (hasInstalledSelectedAsrCatalog ? 'info' : 'warning')
+                    }
+                  >
+                    {isSelectedAsrCatalogActive
+                      ? '所选 ASR 模型状态: 已下载并生效'
+                      : hasInstalledSelectedAsrCatalog
+                        ? '所选 ASR 模型状态: 已下载，但当前未生效'
+                        : '所选 ASR 模型状态: 未下载'}
                   </Alert>
                 ) : (
                   <Alert severity="info">所选 ASR 模型状态: 使用环境变量（未选择内置模型）</Alert>
@@ -987,10 +1060,18 @@ export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownload
                   </Alert>
                 )}
                 {selectedTtsCatalogId ? (
-                  <Alert severity={hasInstalledSelectedTtsCatalog ? 'success' : 'warning'}>
-                    {hasInstalledSelectedTtsCatalog
-                      ? '所选 TTS 模型状态: 已下载'
-                      : '所选 TTS 模型状态: 未下载'}
+                  <Alert
+                    severity={
+                      isSelectedTtsCatalogActive
+                        ? 'success'
+                        : (hasInstalledSelectedTtsCatalog ? 'info' : 'warning')
+                    }
+                  >
+                    {isSelectedTtsCatalogActive
+                      ? '所选 TTS 模型状态: 已下载并生效'
+                      : hasInstalledSelectedTtsCatalog
+                        ? '所选 TTS 模型状态: 已下载，但当前未生效'
+                        : '所选 TTS 模型状态: 未下载'}
                   </Alert>
                 ) : (
                   <Alert severity="info">所选 TTS 模型状态: 使用环境变量（未选择内置模型）</Alert>
@@ -1087,7 +1168,7 @@ export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownload
           </Button>
           {!!ttsTestResult && (
             <Alert severity="success">
-              {`TTS 首包: ${formatMs(ttsTestResult.firstChunkLatencyMs)}；总耗时: ${formatMs(ttsTestResult.latencyMs)}；chunks: ${ttsTestResult.chunkCount || 0}；音频大小: ${formatBytes(ttsTestResult.totalBytes)}。`}
+              {`TTS 首包: ${formatMs(ttsTestResult.firstChunkLatencyMs)}；总耗时: ${formatMs(ttsTestResult.latencyMs)}；chunks: ${ttsTestResult.chunkCount || 0}；音频大小: ${formatBytes(ttsTestResult.totalBytes)}；codec: ${ttsTestResult.codec || 'unknown'}。`}
             </Alert>
           )}
           <Button

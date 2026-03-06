@@ -728,6 +728,9 @@ test('voice diagnostics tts returns first-chunk and total latency', async () => 
   registerVoiceSessionIpc({
     ipcMain,
     emitEvent: () => {},
+    resolveVoiceEnv: () => ({
+      VOICE_TTS_PROVIDER: 'python',
+    }),
     createTtsServiceImpl: () => ({
       synthesize: async ({ onChunk }) => {
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -767,4 +770,66 @@ test('voice diagnostics tts returns first-chunk and total latency', async () => 
   assert.equal(typeof result.pcmS16LeBase64, 'string');
   assert.equal(result.pcmS16LeBase64.length > 0, true);
   assert.equal(result.codec, 'pcm_s16le');
+});
+
+test('voice diagnostics tts rejects missing or mock provider configuration', async () => {
+  const ipcMain = createIpcMainMock();
+  let synthesizeCalled = false;
+
+  registerVoiceSessionIpc({
+    ipcMain,
+    emitEvent: () => {},
+    resolveVoiceEnv: () => ({
+      VOICE_TTS_PROVIDER: 'mock',
+    }),
+    createTtsServiceImpl: () => ({
+      synthesize: async () => {
+        synthesizeCalled = true;
+        return {};
+      },
+    }),
+  });
+
+  const result = await ipcMain.invoke('voice:diagnostics:tts', {
+    text: 'hello',
+    includeAudio: true,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, 'voice_tts_provider_not_configured');
+  assert.equal(synthesizeCalled, false);
+});
+
+test('voice diagnostics tts does not expose non-pcm_s16le preview audio', async () => {
+  const ipcMain = createIpcMainMock();
+
+  registerVoiceSessionIpc({
+    ipcMain,
+    emitEvent: () => {},
+    resolveVoiceEnv: () => ({
+      VOICE_TTS_PROVIDER: 'sherpa-onnx',
+    }),
+    createTtsServiceImpl: () => ({
+      synthesize: async ({ onChunk }) => {
+        await onChunk({
+          audioChunk: Buffer.from([1, 2, 3, 4]),
+          codec: 'pcm_f32le',
+          sampleRate: 24000,
+        });
+        return {
+          sampleRate: 24000,
+          sampleCount: 1,
+        };
+      },
+    }),
+  });
+
+  const result = await ipcMain.invoke('voice:diagnostics:tts', {
+    text: 'hello',
+    includeAudio: true,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.codec, 'pcm_f32le');
+  assert.equal(result.pcmS16LeBase64, undefined);
 });
