@@ -68,6 +68,7 @@ body,
   bottom: 0;
   width: min(420px, 42vw);
   height: min(640px, 74vh);
+  overflow: visible;
   pointer-events: auto;
 }
 
@@ -77,6 +78,21 @@ body,
 
 .live2d-stage.pet-mode .live2d-hitbox.pet-draggable-hitbox .live2d-container {
   cursor: inherit;
+}
+
+.live2d-stage.pet-mode .pet-render-shell {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(1400px, 140vw, 2200px);
+  height: clamp(1800px, 170vh, 2600px);
+  transform: translate(-50%, -50%);
+  overflow: visible;
+}
+
+.live2d-stage.pet-mode .pet-render-shell > .live2d-container {
+  position: absolute;
+  inset: 0;
 }
 
 .live2d-stage.pet-mode .pet-hitbox-controls {

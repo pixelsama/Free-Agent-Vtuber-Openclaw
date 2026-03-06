@@ -29,6 +29,10 @@
   box-shadow: none;
 }
 
+.live2d-stage.pet-mode .live2d-container {
+  overflow: visible;
+}
+
 .live2d-stage.pet-mode .loading-overlay,
 .live2d-stage.pet-mode .error-overlay,
 .live2d-stage.pet-mode .empty-overlay {

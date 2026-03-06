@@ -8,6 +8,48 @@ import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import { usePetDraggable } from '../hooks/pet/usePetDraggable.js';
 import EdgeComposer from '../components/chat/EdgeComposer.jsx';
 import { useI18n } from '../i18n/I18nContext.jsx';
+import { STORAGE_KEYS } from '../components/controls/constants.js';
+
+const PET_DEFAULT_MODEL_SCALE = 0.8;
+
+function normalizeModelScale(scale) {
+  const rounded = Math.round(scale * 10) / 10;
+  return Math.max(0.1, Math.min(3, rounded));
+}
+
+function readStoredModelScale() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.modelConfig) || '{}');
+    return typeof stored?.modelScale === 'number' ? normalizeModelScale(stored.modelScale) : null;
+  } catch (error) {
+    console.warn('Failed to read stored model scale for pet mode:', error);
+    return null;
+  }
+}
+
+function persistModelScale(scale) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.modelConfig);
+    const stored = raw ? JSON.parse(raw) : {};
+    window.localStorage.setItem(
+      STORAGE_KEYS.modelConfig,
+      JSON.stringify({
+        ...stored,
+        modelScale: normalizeModelScale(scale),
+      }),
+    );
+  } catch (error) {
+    console.warn('Failed to persist pet mode model scale:', error);
+  }
+}
 
 export default function PetShell({
   desktopMode,
@@ -136,10 +178,40 @@ export default function PetShell({
             : 1.0;
       const scaleStep = 0.08;
       const direction = event.deltaY < 0 ? 1 : -1;
-      manager.setModelScale(currentScale + direction * scaleStep);
+      const nextScale = normalizeModelScale(currentScale + direction * scaleStep);
+      manager.setModelScale(nextScale);
+      persistModelScale(nextScale);
     },
     [desktopMode, isModelLocked, live2dViewerRef],
   );
+
+  const handlePetModelLoaded = useCallback(
+    (model) => {
+      const manager = live2dViewerRef.current?.getManager?.();
+      if (manager?.isModelLoaded && typeof manager.setModelScale === 'function') {
+        manager.setModelScale(readStoredModelScale() ?? PET_DEFAULT_MODEL_SCALE);
+      }
+
+      onModelLoaded?.(model);
+    },
+    [live2dViewerRef, onModelLoaded],
+  );
+
+  useEffect(() => {
+    const hitboxElement = hitboxRef.current;
+    if (!hitboxElement) {
+      return undefined;
+    }
+
+    const handleWheel = (event) => {
+      handleModelScaleByWheel(event);
+    };
+
+    hitboxElement.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      hitboxElement.removeEventListener('wheel', handleWheel);
+    };
+  }, [handleModelScaleByWheel]);
 
   useEffect(
     () => () => {
@@ -165,7 +237,6 @@ export default function PetShell({
         ref={hitboxRef}
         className={`live2d-hitbox pet-draggable-hitbox ${isDragging ? 'pet-dragging' : ''}`.trim()}
         style={dragStyle}
-        onWheel={handleModelScaleByWheel}
         onMouseEnter={(event) => {
           if (isDragging) {
             setModelHover(true);
@@ -194,17 +265,19 @@ export default function PetShell({
         }}
         {...dragBindings}
       >
-        <Live2DViewer
-          ref={live2dViewerRef}
-          modelPath={currentModelPath}
-          motions={motions}
-          expressions={expressions}
-          width={400}
-          height={600}
-          onModelLoaded={onModelLoaded}
-          onModelError={onModelError}
-          className="live2d-viewer"
-        />
+        <Box className="pet-render-shell">
+          <Live2DViewer
+            ref={live2dViewerRef}
+            modelPath={currentModelPath}
+            motions={motions}
+            expressions={expressions}
+            width={400}
+            height={600}
+            onModelLoaded={handlePetModelLoaded}
+            onModelError={onModelError}
+            className="live2d-viewer"
+          />
+        </Box>
         <SubtitleBar text={subtitleText} className="subtitle-pet-head" />
         <Box
           ref={controlsRef}
