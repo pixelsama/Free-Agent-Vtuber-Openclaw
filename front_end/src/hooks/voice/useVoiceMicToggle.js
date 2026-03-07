@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSileroVad } from './useSileroVad.js';
+import { waitForSpeechDrain } from './pttSpeechDrain.js';
 import { useVoiceSession } from './useVoiceSession.js';
 import { useVoiceTtsPlayback } from './useVoiceTtsPlayback.js';
 
@@ -113,6 +114,8 @@ export function useVoiceMicToggle({
   const segmentIndexRef = useRef(0);
   const segmentTextsRef = useRef([]);
   const speechQueueRef = useRef(Promise.resolve());
+  const pendingSpeechTasksRef = useRef(0);
+  const lastSpeechActivityAtRef = useRef(0);
   const runEpochRef = useRef(0);
   const mountedRef = useRef(true);
   const isArmedRef = useRef(false);
@@ -192,9 +195,16 @@ export function useVoiceMicToggle({
     return speechQueueRef.current;
   }, []);
 
+  const markSpeechActivity = useCallback(() => {
+    lastSpeechActivityAtRef.current = Date.now();
+  }, []);
+
   const handleSpeechEnd = useCallback(
-    async (audioFloat32, epoch) =>
-      enqueueSpeechTask(async () => {
+    async (audioFloat32, epoch) => {
+      pendingSpeechTasksRef.current += 1;
+      markSpeechActivity();
+
+      return enqueueSpeechTask(async () => {
         if (epoch !== runEpochRef.current) {
           return;
         }
@@ -265,32 +275,25 @@ export function useVoiceMicToggle({
             text: finalText,
           });
         }
-      }),
-    [commitInput, enqueueSpeechTask, sendAudioChunk],
+      }).finally(() => {
+        pendingSpeechTasksRef.current = Math.max(0, pendingSpeechTasksRef.current - 1);
+        markSpeechActivity();
+      });
+    },
+    [commitInput, enqueueSpeechTask, markSpeechActivity, sendAudioChunk],
   );
 
   const waitForSpeechQueue = useCallback(
     async ({ timeoutMs }) => {
-      let timeoutId = null;
-      let timeoutTriggered = false;
-
-      const timeoutPromise = new Promise((resolve) => {
-        timeoutId = setTimeout(() => {
-          timeoutTriggered = true;
-          resolve();
-        }, timeoutMs);
+      return waitForSpeechDrain({
+        timeoutMs,
+        getPendingCount: () => pendingSpeechTasksRef.current,
+        getLastActivityAt: () => lastSpeechActivityAtRef.current,
+        getQueue: () => speechQueueRef.current,
+        onWaitStart: markSpeechActivity,
       });
-
-      await Promise.race([speechQueueRef.current, timeoutPromise]);
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-
-      return {
-        timedOut: timeoutTriggered,
-      };
     },
-    [],
+    [markSpeechActivity],
   );
 
   const submitPttTranscription = useCallback(async () => {
@@ -397,6 +400,9 @@ export function useVoiceMicToggle({
       sentSeqRef.current = 0;
       chunkIdRef.current = 0;
       lastCommittedSeqRef.current = 0;
+      speechQueueRef.current = Promise.resolve();
+      pendingSpeechTasksRef.current = 0;
+      lastSpeechActivityAtRef.current = 0;
       segmentIndexRef.current = 0;
       segmentTextsRef.current = [];
       if (mountedRef.current) {
@@ -434,6 +440,9 @@ export function useVoiceMicToggle({
     sentSeqRef.current = 0;
     chunkIdRef.current = 0;
     lastCommittedSeqRef.current = 0;
+    speechQueueRef.current = Promise.resolve();
+    pendingSpeechTasksRef.current = 0;
+    lastSpeechActivityAtRef.current = 0;
     segmentIndexRef.current = 0;
     segmentTextsRef.current = [];
     setCapturedFrames(0);

@@ -14,6 +14,7 @@ import { usePetCursorTracking } from './hooks/pet/usePetCursorTracking.js';
 import { useChatBackendSettings } from './hooks/settings/useOpenClawSettings.js';
 import { usePlatformInfo } from './hooks/window/usePlatformInfo.js';
 import { useVoiceMicToggle } from './hooks/voice/useVoiceMicToggle.js';
+import { buildVoiceStreamRequest } from './hooks/voice/voiceStreamRequest.js';
 import { ModeProvider, MODE_PET, MODE_WINDOW, useModeContext } from './mode/ModeContext.jsx';
 import MainShell from './shells/MainShell.jsx';
 import PetShell from './shells/PetShell.jsx';
@@ -194,18 +195,18 @@ function AppContent({ desktopMode }) {
     isStreaming,
   });
   const submitVoiceText = useCallback(
-    async (content) => {
-      const safeContent = typeof content === 'string' ? content.trim() : '';
-      if (!safeContent) {
+    async (content, request = {}) => {
+      const streamRequest = buildVoiceStreamRequest({
+        content,
+        defaultSessionId: 'text-composer',
+        request,
+      });
+      if (!streamRequest.content) {
         return;
       }
 
       beginStream();
-      await startStreaming('text-composer', safeContent, {
-        options: {
-          source: 'voice-asr',
-        },
-      });
+      await startStreaming(streamRequest.sessionId, streamRequest.content, streamRequest.extras);
     },
     [beginStream, startStreaming],
   );
