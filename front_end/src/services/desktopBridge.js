@@ -421,9 +421,90 @@ export const desktopBridge = {
   isDesktop() {
     return Boolean(getDesktopApi());
   },
+  conversation: {
+    submitUserText(request = {}) {
+      const api = getDesktopApi();
+      if (api?.conversation?.submitUserText) {
+        return api.conversation.submitUserText(request);
+      }
+
+      if (!api?.chatStream?.start) {
+        return Promise.resolve({
+          ok: false,
+          reason: 'desktop_chat_unavailable',
+        });
+      }
+
+      return api.chatStream
+        .start(request)
+        .then((result = {}) => ({
+          ok: true,
+          streamId: result.streamId || '',
+        }))
+        .catch((error) => ({
+          ok: false,
+          reason: error?.message || 'stream_start_failed',
+        }));
+    },
+    abortActive(request = {}) {
+      const api = getDesktopApi();
+      if (api?.conversation?.abortActive) {
+        return api.conversation.abortActive(request);
+      }
+
+      const streamId = typeof request?.streamId === 'string' ? request.streamId.trim() : '';
+      if (!streamId || !api?.chatStream?.abort) {
+        return Promise.resolve({ ok: false, reason: 'desktop_chat_unavailable' });
+      }
+      return api.chatStream.abort({ streamId });
+    },
+    onEvent(handler) {
+      const api = getDesktopApi();
+      if (typeof handler !== 'function') {
+        return () => {};
+      }
+
+      if (api?.conversation?.onEvent) {
+        return api.conversation.onEvent(handler);
+      }
+
+      const offChat = api?.chatStream?.onEvent
+        ? api.chatStream.onEvent((event = {}) => {
+            handler({
+              channel: 'chat',
+              streamId: event.streamId || '',
+              type: event.type || '',
+              payload: event.payload && typeof event.payload === 'object' ? event.payload : {},
+            });
+          })
+        : () => {};
+      const offVoice = api?.voice?.onEvent
+        ? api.voice.onEvent((event = {}) => {
+            handler({
+              channel: 'voice',
+              ...(event || {}),
+            });
+          })
+        : () => {};
+
+      return () => {
+        offChat?.();
+        offVoice?.();
+      };
+    },
+  },
   chat: {
     start(request) {
       const api = getDesktopApi();
+      if (api?.conversation?.submitUserText) {
+        return api.conversation.submitUserText(request).then((result = {}) => {
+          if (result.ok && result.streamId) {
+            return { streamId: result.streamId };
+          }
+
+          throw new Error(result.reason || 'desktop_chat_unavailable');
+        });
+      }
       if (!api?.chatStream?.start) {
         throw new Error('desktop_chat_unavailable');
       }

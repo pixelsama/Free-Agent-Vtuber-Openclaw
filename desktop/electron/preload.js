@@ -40,6 +40,18 @@ const chatStream = {
   },
 };
 
+const conversation = {
+  submitUserText(request) {
+    return ipcRenderer.invoke('conversation:submit-user-text', request);
+  },
+  abortActive(request) {
+    return ipcRenderer.invoke('conversation:abort-active', request);
+  },
+  onEvent(handler) {
+    return onChannel('conversation:event', handler);
+  },
+};
+
 const settings = {
   get() {
     return ipcRenderer.invoke('settings:get');
@@ -185,6 +197,7 @@ contextBridge.exposeInMainWorld('desktop', {
   isElectron: true,
   platform: process.platform,
   chatStream,
+  conversation,
   settings,
   nanobotRuntime,
   nanobotDebug,

@@ -13,6 +13,7 @@ const desktopBufferedEvents = new Map();
 const desktopBufferTimers = new Map();
 let desktopEventCleanup = null;
 let activeDesktopStreamId = null;
+let activeDesktopSessionId = '';
 
 let isStreamingState = false;
 let abortController = null;
@@ -84,6 +85,33 @@ const consumeBufferedDesktopEvents = (streamId) => {
   return buffered;
 };
 
+const normalizeDesktopChatConversationEvent = (event = {}) => {
+  if (!event || typeof event !== 'object') {
+    return null;
+  }
+
+  if (event.channel === 'chat') {
+    const streamId = typeof event.streamId === 'string' ? event.streamId : '';
+    const type = typeof event.type === 'string' ? event.type : '';
+    const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+    if (!streamId || !type) {
+      return null;
+    }
+    return { streamId, type, payload };
+  }
+
+  // Backward-compatible shape from legacy `chat:stream:event`.
+  if (typeof event.streamId === 'string' && typeof event.type === 'string') {
+    return {
+      streamId: event.streamId,
+      type: event.type,
+      payload: event.payload && typeof event.payload === 'object' ? event.payload : {},
+    };
+  }
+
+  return null;
+};
+
 const resolveDesktopPending = (streamId, pending, endedBy, payload = null) => {
   const isActiveStream = activeDesktopStreamId === streamId;
   if (endedBy === 'done') {
@@ -93,6 +121,7 @@ const resolveDesktopPending = (streamId, pending, endedBy, payload = null) => {
   desktopPendingMap.delete(streamId);
   if (isActiveStream) {
     activeDesktopStreamId = null;
+    activeDesktopSessionId = '';
   }
   if (pending.adopted && isActiveStream) {
     setStreamingState(false);
@@ -221,8 +250,13 @@ const ensureDesktopEventListener = () => {
     return;
   }
 
-  desktopEventCleanup = desktopBridge.chat.onEvent((event = {}) => {
-    const { streamId, type, payload } = event;
+  desktopEventCleanup = desktopBridge.conversation.onEvent((event = {}) => {
+    const normalized = normalizeDesktopChatConversationEvent(event);
+    if (!normalized) {
+      return;
+    }
+
+    const { streamId, type, payload } = normalized;
     if (!streamId || !type) {
       return;
     }
@@ -249,19 +283,18 @@ const ensureDesktopEventListener = () => {
 const startDesktopStreaming = async (sessionId, content, extras, emitDone) => {
   ensureDesktopEventListener();
 
-  if (activeDesktopStreamId) {
-    try {
-      await desktopBridge.chat.abort({ streamId: activeDesktopStreamId });
-    } catch (error) {
-      console.warn('Abort previous desktop stream failed:', error);
-    }
-  }
-
-  const startResult = await desktopBridge.chat.start({
+  const startResult = await desktopBridge.conversation.submitUserText({
     sessionId,
     content,
-    options: extras?.options || {},
+    policy: extras?.policy || 'latest-wins',
+    options: {
+      ...(extras?.options || {}),
+    },
   });
+
+  if (!startResult?.ok) {
+    throw new Error(startResult?.reason || 'desktop_stream_start_failed');
+  }
 
   const streamId = startResult?.streamId;
   if (!streamId) {
@@ -269,6 +302,7 @@ const startDesktopStreaming = async (sessionId, content, extras, emitDone) => {
   }
 
   activeDesktopStreamId = streamId;
+  activeDesktopSessionId = sessionId || '';
 
   await new Promise((resolve) => {
     const pending = {
@@ -385,14 +419,18 @@ const startStreaming = async (sessionId, content, extras = {}) => {
 
 const cancelStreaming = async () => {
   if (desktopBridge.isDesktop()) {
-    if (activeDesktopStreamId) {
-      const streamId = activeDesktopStreamId;
-      activeDesktopStreamId = null;
-      try {
-        await desktopBridge.chat.abort({ streamId });
-      } catch (error) {
-        console.error('Abort desktop stream failed:', error);
-      }
+    const streamId = activeDesktopStreamId;
+    const sessionId = activeDesktopSessionId;
+    activeDesktopStreamId = null;
+    activeDesktopSessionId = '';
+    try {
+      await desktopBridge.conversation.abortActive({
+        sessionId: sessionId || 'text-composer',
+        streamId: streamId || '',
+        reason: 'manual',
+      });
+    } catch (error) {
+      console.error('Abort desktop stream failed:', error);
     }
     return;
   }

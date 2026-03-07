@@ -41,12 +41,12 @@ function AppContent({ desktopMode }) {
   const { subtitleText, appendDelta, setSegmentText, finishStream, clearSubtitle, beginStream } = useSubtitleFeed();
   const { startStreaming, cancelStreaming, onDelta, onSegmentReady, onDone, onError, isStreaming } =
     useStreamingChat();
-  const onVoiceEvent = useCallback(
+  const onConversationEvent = useCallback(
     (handler) => {
       if (!desktopMode || typeof handler !== 'function') {
         return () => {};
       }
-      return desktopBridge.voice.onEvent(handler);
+      return desktopBridge.conversation.onEvent(handler);
     },
     [desktopMode],
   );
@@ -139,7 +139,11 @@ function AppContent({ desktopMode }) {
       return () => {};
     }
 
-    return desktopBridge.chat.onEvent((event = {}) => {
+    return desktopBridge.conversation.onEvent((event = {}) => {
+      if (event?.channel !== 'chat') {
+        return;
+      }
+
       const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
       if (payload.source !== 'nanobot') {
         return;
@@ -156,7 +160,7 @@ function AppContent({ desktopMode }) {
             message: 'Renderer received chat stream event.',
             details: {
               streamId: event.streamId || '',
-              payload,
+              payload: event.payload || {},
             },
           },
         ];
@@ -245,7 +249,7 @@ function AppContent({ desktopMode }) {
     onSegmentReady,
     onDone,
     onError,
-    onVoiceEvent,
+    onConversationEvent,
     normalizeError,
     onComposerError: setComposerExternalError,
   });

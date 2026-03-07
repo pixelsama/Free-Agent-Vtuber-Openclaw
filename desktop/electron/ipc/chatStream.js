@@ -328,6 +328,20 @@ function registerChatStreamIpc({
   };
 
   dispose.start = async (request = {}) => startChatStream(request);
+  dispose.abort = async ({ streamId } = {}) => {
+    if (typeof streamId !== 'string' || !streamId) {
+      return { ok: false, reason: 'invalid_stream_id' };
+    }
+
+    const state = streamMap.get(streamId);
+    if (!state) {
+      return { ok: true, reason: 'not_found' };
+    }
+
+    state.aborted = true;
+    state.controller.abort();
+    return { ok: true };
+  };
 
   return dispose;
 }

@@ -2,11 +2,13 @@ const path = require('node:path');
 const { app, BrowserWindow, shell, ipcMain, protocol, screen } = require('electron');
 
 const { registerChatStreamIpc } = require('./ipc/chatStream');
+const { registerConversationIpc } = require('./ipc/conversation');
 const { registerLive2DModelsIpc } = require('./ipc/live2dModels');
 const { registerNanobotRuntimeIpc } = require('./ipc/nanobotRuntime');
 const { registerSettingsIpc } = require('./ipc/settings');
 const { registerVoiceModelsIpc } = require('./ipc/voiceModels');
 const { registerVoiceSessionIpc } = require('./ipc/voiceSession');
+const { createConversationRuntime } = require('./services/chat/conversationRuntime');
 const { createChatBackendManager } = require('./services/chat/backendManager');
 const { NanobotBackendAdapter } = require('./services/chat/backends/nanobotBackend');
 const { OpenClawBackendAdapter } = require('./services/chat/backends/openclawBackend');
@@ -35,12 +37,14 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow = null;
 let disposeChatStreamHandlers = null;
+let disposeConversationHandlers = null;
 let disposeModeHandlers = null;
 let disposeLive2DModelsHandlers = null;
 let disposeNanobotRuntimeHandlers = null;
 let disposeVoiceModelsHandlers = null;
 let disposeVoiceSessionHandlers = null;
 let startChatStreamFromMain = null;
+let conversationRuntime = null;
 let settingsStore = null;
 let windowModeManager = null;
 let trayManager = null;
@@ -340,6 +344,7 @@ async function bootstrap() {
       });
     },
     emitEvent: (payload) => {
+      conversationRuntime?.onChatStreamEvent?.(payload);
       if (disposeVoiceSessionHandlers && typeof disposeVoiceSessionHandlers.enqueueSegmentReady === 'function') {
         if (payload?.type === 'segment-ready' && payload?.payload) {
           try {
@@ -386,10 +391,57 @@ async function bootstrap() {
   disposeChatStreamHandlers = chatStreamControl;
   startChatStreamFromMain =
     typeof chatStreamControl?.start === 'function' ? chatStreamControl.start : null;
+  conversationRuntime = createConversationRuntime({
+    startChatStream: async (request = {}) => {
+      if (typeof startChatStreamFromMain !== 'function') {
+        return {
+          ok: false,
+          reason: 'chat_stream_unavailable',
+        };
+      }
+      return startChatStreamFromMain(request);
+    },
+    abortChatStream: async ({ streamId } = {}) => {
+      if (!streamId) {
+        return {
+          ok: false,
+          reason: 'invalid_stream_id',
+        };
+      }
+      if (typeof chatStreamControl?.abort !== 'function') {
+        return {
+          ok: false,
+          reason: 'chat_stream_unavailable',
+        };
+      }
+      return chatStreamControl.abort({ streamId });
+    },
+    emitConversationEvent: (payload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+
+      mainWindow.webContents.send('conversation:event', payload);
+    },
+    emitDebugLog: (payload = {}) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+      mainWindow.webContents.send('nanobot-debug:log', {
+        timestamp: new Date().toISOString(),
+        ...payload,
+      });
+    },
+  });
+  disposeConversationHandlers = registerConversationIpc({
+    ipcMain,
+    conversationRuntime,
+  });
 
   disposeVoiceSessionHandlers = registerVoiceSessionIpc({
     ipcMain,
     emitEvent: (payload) => {
+      conversationRuntime?.onVoiceEvent?.(payload);
       if (!mainWindow || mainWindow.isDestroyed()) {
         return;
       }
@@ -405,14 +457,15 @@ async function bootstrap() {
     },
     onAsrFinal: async ({ sessionId, text }) => {
       const content = typeof text === 'string' ? text.trim() : '';
-      if (!content || typeof startChatStreamFromMain !== 'function') {
+      if (!content || !conversationRuntime) {
         return;
       }
 
       try {
-        const started = await startChatStreamFromMain({
+        const started = await conversationRuntime.submitUserText({
           sessionId,
           content,
+          policy: 'latest-wins',
           options: {
             source: 'voice-asr',
           },
@@ -473,6 +526,13 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true;
 
+  if (conversationRuntime) {
+    void conversationRuntime.dispose();
+    conversationRuntime = null;
+  }
+  if (disposeConversationHandlers) {
+    disposeConversationHandlers();
+  }
   if (disposeChatStreamHandlers) {
     disposeChatStreamHandlers();
   }

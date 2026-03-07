@@ -33,7 +33,7 @@ export function useStreamingSubtitleBridge({
   onSegmentReady,
   onDone,
   onError,
-  onVoiceEvent,
+  onConversationEvent,
   normalizeError,
   onComposerError,
 }) {
@@ -290,20 +290,26 @@ export function useStreamingSubtitleBridge({
       finishStream();
     });
 
-    const detachVoice = onVoiceEvent?.((event = {}) => {
+    const detachVoice = onConversationEvent?.((event = {}) => {
       if (!event || typeof event !== 'object') {
         return;
       }
 
+      if (event.channel && event.channel !== 'voice') {
+        return;
+      }
+
+      const voiceEvent = event;
+
       if (
-        event.type !== 'segment-tts-started'
-        && event.type !== 'segment-tts-finished'
-        && event.type !== 'segment-tts-failed'
+        voiceEvent.type !== 'segment-tts-started'
+        && voiceEvent.type !== 'segment-tts-finished'
+        && voiceEvent.type !== 'segment-tts-failed'
       ) {
         return;
       }
 
-      const segmentId = normalizeSegmentId(event);
+      const segmentId = normalizeSegmentId(voiceEvent);
       if (!segmentId) {
         return;
       }
@@ -311,7 +317,7 @@ export function useStreamingSubtitleBridge({
       pruneStartedBeforeReady();
       const entry = pendingSegments.get(segmentId);
 
-      if (event.type === 'segment-tts-started') {
+      if (voiceEvent.type === 'segment-tts-started') {
         if (!sawTtsLifecycle) {
           sawTtsLifecycle = true;
           syntheticQueue.length = 0;
@@ -325,7 +331,7 @@ export function useStreamingSubtitleBridge({
 
         if (!entry) {
           startedBeforeReady.set(segmentId, {
-            text: typeof event.text === 'string' ? event.text.trim() : '',
+            text: typeof voiceEvent.text === 'string' ? voiceEvent.text.trim() : '',
             at: Date.now(),
           });
           return;
@@ -338,7 +344,7 @@ export function useStreamingSubtitleBridge({
         pendingSegments.set(segmentId, entry);
         removeSyntheticQueueEntry(segmentId);
         applySegmentText(
-          typeof event.text === 'string' && event.text.trim() ? event.text : entry.text,
+          typeof voiceEvent.text === 'string' && voiceEvent.text.trim() ? voiceEvent.text : entry.text,
         );
         return;
       }
@@ -348,17 +354,17 @@ export function useStreamingSubtitleBridge({
         pendingSegments.delete(segmentId);
       }
 
-      if (event.type === 'segment-tts-finished') {
+      if (voiceEvent.type === 'segment-tts-finished') {
         if (entry) {
           scheduleSubtitleClear(TTS_FINISH_HOLD_MS);
         }
         return;
       }
 
-      if (event.type === 'segment-tts-failed') {
+      if (voiceEvent.type === 'segment-tts-failed') {
         const fallbackText =
-          typeof event.text === 'string' && event.text.trim()
-            ? event.text
+          typeof voiceEvent.text === 'string' && voiceEvent.text.trim()
+            ? voiceEvent.text
             : entry?.text || '';
         if (fallbackText) {
           applySegmentText(fallbackText);
@@ -397,6 +403,6 @@ export function useStreamingSubtitleBridge({
     onSegmentReady,
     onDone,
     onError,
-    onVoiceEvent,
+    onConversationEvent,
   ]);
 }
