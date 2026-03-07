@@ -49,3 +49,18 @@ export async function waitForSpeechDrain({
     timedOut: true,
   };
 }
+
+export async function waitForSpeechQueueSettled({
+  getPendingCount = () => 0,
+  getQueue = () => Promise.resolve(),
+} = {}) {
+  while (true) {
+    const queueSnapshot = getQueue();
+    await queueSnapshot;
+    if (getPendingCount() === 0 && queueSnapshot === getQueue()) {
+      return {
+        settled: true,
+      };
+    }
+  }
+}

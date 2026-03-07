@@ -240,11 +240,24 @@ function AppContent({ desktopMode }) {
         request,
       });
       if (!streamRequest.content) {
+        console.warn('[voice-submit] Skipped voice submission because content was empty.', {
+          sessionId: streamRequest.sessionId,
+          source: streamRequest.extras?.options?.source || 'voice-asr',
+        });
         return;
       }
 
+      console.info('[voice-submit] Forwarding voice text to streaming chat.', {
+        sessionId: streamRequest.sessionId,
+        source: streamRequest.extras?.options?.source || 'voice-asr',
+        textLength: streamRequest.content.length,
+      });
       beginStream();
       await startStreaming(streamRequest.sessionId, streamRequest.content, streamRequest.extras);
+      console.info('[voice-submit] Streaming chat request started for voice text.', {
+        sessionId: streamRequest.sessionId,
+        source: streamRequest.extras?.options?.source || 'voice-asr',
+      });
     },
     [beginStream, startStreaming],
   );

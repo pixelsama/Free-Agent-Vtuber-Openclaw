@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { waitForSpeechDrain } from '../src/hooks/voice/pttSpeechDrain.js';
+import { waitForSpeechDrain, waitForSpeechQueueSettled } from '../src/hooks/voice/pttSpeechDrain.js';
 
 describe('waitForSpeechDrain', () => {
   afterEach(() => {
@@ -82,5 +82,66 @@ describe('waitForSpeechDrain', () => {
     await vi.advanceTimersByTimeAsync(130);
 
     await expect(drainPromise).resolves.toEqual({ timedOut: true });
+  });
+});
+
+describe('waitForSpeechQueueSettled', () => {
+  it('waits for the current in-flight queue promise to finish', async () => {
+    let pendingCount = 1;
+    let resolveQueue = () => {};
+    const queue = new Promise((resolve) => {
+      resolveQueue = () => {
+        pendingCount = 0;
+        resolve();
+      };
+    });
+
+    let settled = false;
+    const settlePromise = waitForSpeechQueueSettled({
+      getPendingCount: () => pendingCount,
+      getQueue: () => queue,
+    }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveQueue();
+
+    await expect(settlePromise).resolves.toEqual({ settled: true });
+  });
+
+  it('waits for queue snapshots added after the first promise resolves', async () => {
+    let pendingCount = 1;
+    let resolveFirst = () => {};
+    let resolveSecond = () => {};
+
+    const secondQueue = new Promise((resolve) => {
+      resolveSecond = () => {
+        pendingCount = 0;
+        resolve();
+      };
+    });
+
+    let queue = new Promise((resolve) => {
+      resolveFirst = () => {
+        pendingCount = 1;
+        queue = secondQueue;
+        resolve();
+      };
+    });
+
+    const settlePromise = waitForSpeechQueueSettled({
+      getPendingCount: () => pendingCount,
+      getQueue: () => queue,
+    });
+
+    resolveFirst();
+    await Promise.resolve();
+    resolveSecond();
+
+    await expect(settlePromise).resolves.toEqual({ settled: true });
   });
 });

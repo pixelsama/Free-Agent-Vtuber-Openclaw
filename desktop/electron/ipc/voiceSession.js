@@ -13,6 +13,10 @@ const DEFAULT_TTS_BACKPRESSURE_TIMEOUT_MS = 5000;
 const TTS_ACK_WATCHDOG_INTERVAL_MS = 200;
 const SEGMENT_TRACE_LIMIT = 20;
 
+function logVoiceSession(message, details = {}) {
+  console.info('[voice-session]', message, details);
+}
+
 function createAbortError() {
   const error = new Error('aborted');
   error.name = 'AbortError';
@@ -1160,6 +1164,10 @@ function registerVoiceSessionIpc({
     const sessionId = normalizeSessionId(request.sessionId);
     const sessionState = sessionMap.get(sessionId);
     if (!sessionState) {
+      console.warn('[voice-session] Rejected audio chunk for missing session.', {
+        sessionId,
+        seq: normalizeSeq(request.seq),
+      });
       return {
         ok: false,
         reason: 'session_not_found',
@@ -1168,6 +1176,11 @@ function registerVoiceSessionIpc({
 
     const seq = normalizeSeq(request.seq);
     if (seq <= sessionState.lastSeq) {
+      console.warn('[voice-session] Rejected stale audio chunk sequence.', {
+        sessionId,
+        seq,
+        lastSeq: sessionState.lastSeq,
+      });
       return {
         ok: false,
         reason: 'stale_seq',
@@ -1179,6 +1192,10 @@ function registerVoiceSessionIpc({
     const chunkValue = request.pcmChunk;
     const chunkBuffer = Buffer.isBuffer(chunkValue) ? chunkValue : Buffer.from(chunkValue || []);
     if (!chunkBuffer.length) {
+      console.warn('[voice-session] Rejected empty audio chunk buffer.', {
+        sessionId,
+        seq,
+      });
       return {
         ok: false,
         reason: 'empty_chunk',
@@ -1194,6 +1211,16 @@ function registerVoiceSessionIpc({
       isSpeech: Boolean(request.isSpeech),
       pcmChunk: chunkBuffer,
     });
+    const chunkCount = sessionState.audioChunks.length;
+    if (chunkCount === 1 || chunkCount % 20 === 0) {
+      logVoiceSession('Buffered audio chunk for pending ASR commit.', {
+        sessionId,
+        seq,
+        chunkCount,
+        chunkBytes: chunkBuffer.length,
+        isSpeech: Boolean(request.isSpeech),
+      });
+    }
 
     return {
       ok: true,
@@ -1207,6 +1234,10 @@ function registerVoiceSessionIpc({
     const autoStartChat = request.autoStartChat !== false;
     const sessionState = sessionMap.get(sessionId);
     if (!sessionState) {
+      console.warn('[voice-session] Rejected commit for missing session.', {
+        sessionId,
+        autoStartChat,
+      });
       return {
         ok: false,
         reason: 'session_not_found',
@@ -1214,6 +1245,10 @@ function registerVoiceSessionIpc({
     }
 
     if (sessionState.status === SESSION_STATUS_TRANSCRIBING) {
+      console.warn('[voice-session] Rejected commit because transcription is already in progress.', {
+        sessionId,
+        autoStartChat,
+      });
       return {
         ok: false,
         reason: 'transcribing_in_progress',
@@ -1221,7 +1256,17 @@ function registerVoiceSessionIpc({
     }
 
     const committedChunks = sessionState.audioChunks;
+    logVoiceSession('Received voice commit request.', {
+      sessionId,
+      autoStartChat,
+      bufferedChunkCount: committedChunks.length,
+      status: sessionState.status,
+    });
     if (!committedChunks.length) {
+      console.warn('[voice-session] Commit had no buffered audio chunks.', {
+        sessionId,
+        autoStartChat,
+      });
       return {
         ok: false,
         reason: 'empty_audio',
@@ -1238,6 +1283,11 @@ function registerVoiceSessionIpc({
     try {
       const runtime = resolveRuntime();
       let partialSeq = 0;
+      logVoiceSession('Starting ASR transcription for committed audio.', {
+        sessionId,
+        autoStartChat,
+        chunkCount: committedChunks.length,
+      });
       const result = await runtime.asrService.transcribe({
         audioChunks: committedChunks,
         signal: sessionState.asrController.signal,
@@ -1253,6 +1303,13 @@ function registerVoiceSessionIpc({
       });
 
       const finalText = typeof result?.text === 'string' ? result.text.trim() : '';
+      logVoiceSession('ASR transcription completed.', {
+        sessionId,
+        autoStartChat,
+        chunkCount: committedChunks.length,
+        partialCount: partialSeq,
+        textLength: finalText.length,
+      });
       if (finalText) {
         sendEvent({
           type: 'asr-final',
@@ -1263,6 +1320,10 @@ function registerVoiceSessionIpc({
       }
 
       if (typeof onAsrFinal === 'function' && finalText && autoStartChat) {
+        logVoiceSession('Forwarding ASR final text to chat runtime.', {
+          sessionId,
+          textLength: finalText.length,
+        });
         await onAsrFinal({
           sessionId,
           text: finalText,
@@ -1283,6 +1344,12 @@ function registerVoiceSessionIpc({
         text: finalText,
       };
     } catch (error) {
+      console.error('[voice-session] ASR transcription failed.', {
+        sessionId,
+        autoStartChat,
+        chunkCount: committedChunks.length,
+        message: error?.message || '',
+      });
       sessionState.audioChunks = committedChunks.concat(sessionState.audioChunks);
       const payload = toVoiceError(error, 'voice_asr_failed', 'transcribing');
       sendError(sessionId, payload);

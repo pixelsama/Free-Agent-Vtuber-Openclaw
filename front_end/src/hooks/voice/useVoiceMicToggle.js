@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSileroVad } from './useSileroVad.js';
-import { waitForSpeechDrain } from './pttSpeechDrain.js';
+import { waitForSpeechDrain, waitForSpeechQueueSettled } from './pttSpeechDrain.js';
 import { useVoiceSession } from './useVoiceSession.js';
 import { useVoiceTtsPlayback } from './useVoiceTtsPlayback.js';
 
@@ -62,6 +62,27 @@ function normalizePositiveInteger(value, fallback) {
   }
 
   return Math.floor(parsed);
+}
+
+function previewText(value, limit = 80) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return '';
+  }
+
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, limit)}...`;
+}
+
+function logPtt(message, details = {}) {
+  console.info('[voice-ptt]', message, details);
 }
 
 function eventMatchesPttHotkey(event, hotkey) {
@@ -203,9 +224,18 @@ export function useVoiceMicToggle({
     async (audioFloat32, epoch) => {
       pendingSpeechTasksRef.current += 1;
       markSpeechActivity();
+      logPtt('Queued speech-end task from VAD.', {
+        epoch,
+        audioSamples: audioFloat32 instanceof Float32Array ? audioFloat32.length : 0,
+        pendingSpeechTasks: pendingSpeechTasksRef.current,
+      });
 
       return enqueueSpeechTask(async () => {
         if (epoch !== runEpochRef.current) {
+          logPtt('Skipped speech-end task because epoch is stale.', {
+            epoch,
+            activeEpoch: runEpochRef.current,
+          });
           return;
         }
 
@@ -213,11 +243,28 @@ export function useVoiceMicToggle({
         segmentIndexRef.current += 1;
         const chunks = splitFloat32ToPcmChunks(audioFloat32, DEFAULT_FRAME_SAMPLES);
         if (!chunks.length) {
+          console.warn('[voice-ptt] Speech-end task produced no PCM chunks.', {
+            epoch,
+            segmentIndex: currentSegmentIndex,
+            audioSamples: audioFloat32 instanceof Float32Array ? audioFloat32.length : 0,
+          });
           return;
         }
 
+        logPtt('Processing speech segment for commit.', {
+          epoch,
+          segmentIndex: currentSegmentIndex,
+          pcmChunkCount: chunks.length,
+          audioSamples: audioFloat32 instanceof Float32Array ? audioFloat32.length : 0,
+        });
+
         for (const pcmChunk of chunks) {
           if (epoch !== runEpochRef.current) {
+            logPtt('Stopped sending PCM chunks because epoch changed mid-segment.', {
+              epoch,
+              activeEpoch: runEpochRef.current,
+              segmentIndex: currentSegmentIndex,
+            });
             return;
           }
 
@@ -239,6 +286,13 @@ export function useVoiceMicToggle({
           });
 
           if (!sent?.ok) {
+            console.warn('[voice-ptt] Failed to send PCM chunk to voice session.', {
+              epoch,
+              segmentIndex: currentSegmentIndex,
+              seq: nextSeq,
+              chunkId: chunkIdRef.current,
+              reason: sent?.reason || 'unknown_reason',
+            });
             setLocalError(sent?.reason || 'voice_send_audio_chunk_failed');
             return;
           }
@@ -247,20 +301,44 @@ export function useVoiceMicToggle({
         }
 
         if (epoch !== runEpochRef.current) {
+          logPtt('Skipped commit because epoch changed after chunk upload.', {
+            epoch,
+            activeEpoch: runEpochRef.current,
+            segmentIndex: currentSegmentIndex,
+          });
           return;
         }
 
         const finalSeq = sentSeqRef.current;
         if (finalSeq <= lastCommittedSeqRef.current) {
+          logPtt('Skipped commit because no new PCM sequence was buffered.', {
+            epoch,
+            segmentIndex: currentSegmentIndex,
+            finalSeq,
+            lastCommittedSeq: lastCommittedSeqRef.current,
+          });
           return;
         }
 
+        logPtt('Submitting speech segment to ASR commit.', {
+          epoch,
+          segmentIndex: currentSegmentIndex,
+          finalSeq,
+          lastCommittedSeq: lastCommittedSeqRef.current,
+          sentSeq: sentSeqRef.current,
+        });
         const committed = await commitInput({
           finalSeq,
           autoStartChat: false,
         });
 
         if (!committed?.ok) {
+          console.warn('[voice-ptt] ASR commit returned a non-ok result.', {
+            epoch,
+            segmentIndex: currentSegmentIndex,
+            finalSeq,
+            reason: committed?.reason || 'unknown_reason',
+          });
           if (committed?.reason !== 'empty_audio') {
             setLocalError(committed?.reason || 'voice_commit_failed');
           }
@@ -269,15 +347,33 @@ export function useVoiceMicToggle({
 
         lastCommittedSeqRef.current = finalSeq;
         const finalText = typeof committed.text === 'string' ? committed.text.trim() : '';
+        logPtt('Speech segment commit finished.', {
+          epoch,
+          segmentIndex: currentSegmentIndex,
+          finalSeq,
+          textLength: finalText.length,
+          textPreview: previewText(finalText),
+        });
         if (finalText) {
           segmentTextsRef.current.push({
             segmentIndex: currentSegmentIndex,
             text: finalText,
           });
+          logPtt('Stored ASR text for aggregated PTT submit.', {
+            epoch,
+            segmentIndex: currentSegmentIndex,
+            bufferedSegmentCount: segmentTextsRef.current.length,
+            textLength: finalText.length,
+          });
         }
       }).finally(() => {
         pendingSpeechTasksRef.current = Math.max(0, pendingSpeechTasksRef.current - 1);
         markSpeechActivity();
+        logPtt('Speech-end task settled.', {
+          epoch,
+          pendingSpeechTasks: pendingSpeechTasksRef.current,
+          bufferedSegmentCount: segmentTextsRef.current.length,
+        });
       });
     },
     [commitInput, enqueueSpeechTask, markSpeechActivity, sendAudioChunk],
@@ -296,19 +392,37 @@ export function useVoiceMicToggle({
     [markSpeechActivity],
   );
 
+  const waitForSpeechQueueSettledAfterTimeout = useCallback(async () => {
+    return waitForSpeechQueueSettled({
+      getPendingCount: () => pendingSpeechTasksRef.current,
+      getQueue: () => speechQueueRef.current,
+    });
+  }, []);
+
   const submitPttTranscription = useCallback(async () => {
-    const text = segmentTextsRef.current
+    const orderedSegments = segmentTextsRef.current
       .slice()
       .sort((left, right) => left.segmentIndex - right.segmentIndex)
-      .map((item) => item.text)
-      .filter(Boolean)
-      .join(' ')
-      .trim();
+      .filter((item) => Boolean(item?.text));
+    const text = orderedSegments.map((item) => item.text).join(' ').trim();
+
+    logPtt('Submitting aggregated PTT transcription.', {
+      sessionId: chatSessionId,
+      segmentCount: orderedSegments.length,
+      textLength: text.length,
+      textPreview: previewText(text),
+      hasSubmitHandler: typeof onSubmitVoiceText === 'function',
+    });
 
     segmentTextsRef.current = [];
     segmentIndexRef.current = 0;
 
     if (!text || typeof onSubmitVoiceText !== 'function') {
+      console.warn('[voice-ptt] Aggregated PTT submit was skipped.', {
+        sessionId: chatSessionId,
+        reason: text ? 'submit_handler_missing' : 'empty_text',
+        textLength: text.length,
+      });
       return { ok: Boolean(text), reason: text ? 'submit_handler_missing' : 'empty_text' };
     }
 
@@ -316,38 +430,69 @@ export function useVoiceMicToggle({
       sessionId: chatSessionId,
       source: 'voice-ptt',
     });
+    logPtt('Forwarded aggregated PTT transcription to chat submitter.', {
+      sessionId: chatSessionId,
+      textLength: text.length,
+      textPreview: previewText(text),
+    });
     return { ok: true };
   }, [chatSessionId, onSubmitVoiceText]);
 
   const startPttCapture = useCallback(async () => {
     if (!isArmedRef.current || isPttCapturingRef.current || isFlushingRef.current) {
+      console.warn('[voice-ptt] Ignored PTT start because the voice toggle is not ready.', {
+        isArmed: isArmedRef.current,
+        isPttCapturing: isPttCapturingRef.current,
+        isFlushing: isFlushingRef.current,
+      });
       return { ok: false, reason: 'ptt_not_ready' };
     }
 
     if (status === 'transcribing') {
+      console.warn('[voice-ptt] Ignored PTT start because ASR is still transcribing.', {
+        status,
+      });
       return { ok: false, reason: 'voice_transcribing_in_progress' };
     }
 
     const nextEpoch = runEpochRef.current + 1;
     runEpochRef.current = nextEpoch;
     setLocalError('');
+    logPtt('Starting PTT capture.', {
+      epoch: nextEpoch,
+      sessionId,
+      status,
+      hotkey: normalizedHotkey,
+    });
 
     const started = await startVad({
       onSpeechEnd: async (audioFloat32) => handleSpeechEnd(audioFloat32, nextEpoch),
     });
 
     if (!started?.ok) {
+      console.warn('[voice-ptt] Failed to start VAD for PTT capture.', {
+        epoch: nextEpoch,
+        reason: started?.reason || 'unknown_reason',
+      });
       setLocalError(started?.reason || 'silero_vad_start_failed');
       return started;
     }
 
     isPttCapturingRef.current = true;
     setIsPttCapturing(true);
+    logPtt('PTT capture started.', {
+      epoch: nextEpoch,
+      sessionId,
+    });
     return { ok: true };
-  }, [handleSpeechEnd, startVad, status]);
+  }, [handleSpeechEnd, normalizedHotkey, sessionId, startVad, status]);
 
   const stopPttCaptureAndSubmit = useCallback(async () => {
     if (!isPttCapturingRef.current || isFlushingRef.current) {
+      console.warn('[voice-ptt] Ignored PTT stop because capture is not active.', {
+        isPttCapturing: isPttCapturingRef.current,
+        isFlushing: isFlushingRef.current,
+      });
       return { ok: false, reason: 'ptt_not_capturing' };
     }
 
@@ -355,19 +500,51 @@ export function useVoiceMicToggle({
     setIsFlushing(true);
     isPttCapturingRef.current = false;
     setIsPttCapturing(false);
+    logPtt('Stopping PTT capture and flushing pending speech.', {
+      epoch: runEpochRef.current,
+      pendingSpeechTasks: pendingSpeechTasksRef.current,
+      capturedFrames,
+      bufferedSegmentCount: segmentTextsRef.current.length,
+    });
 
     try {
-      await stopVad();
+      const stopResult = await stopVad();
+      logPtt('VAD stop completed for PTT flush.', {
+        epoch: runEpochRef.current,
+        ok: stopResult?.ok !== false,
+        reason: stopResult?.reason || '',
+      });
 
       const { timedOut } = await waitForSpeechQueue({
         timeoutMs: flushTimeoutMs,
       });
+      logPtt('Speech queue wait finished.', {
+        epoch: runEpochRef.current,
+        timedOut,
+        pendingSpeechTasks: pendingSpeechTasksRef.current,
+        bufferedSegmentCount: segmentTextsRef.current.length,
+      });
       if (timedOut) {
-        runEpochRef.current += 1;
-        setLocalError('voice_ptt_flush_timeout_partial_submit');
+        console.warn('[voice-ptt] Speech queue exceeded soft flush timeout; waiting for in-flight speech to finish.', {
+          epoch: runEpochRef.current,
+          pendingSpeechTasks: pendingSpeechTasksRef.current,
+          bufferedSegmentCount: segmentTextsRef.current.length,
+          flushTimeoutMs,
+        });
+        await waitForSpeechQueueSettledAfterTimeout();
+        logPtt('Speech queue settled after soft timeout.', {
+          epoch: runEpochRef.current,
+          pendingSpeechTasks: pendingSpeechTasksRef.current,
+          bufferedSegmentCount: segmentTextsRef.current.length,
+        });
       }
 
       const submitResult = await submitPttTranscription();
+      logPtt('PTT submit finished.', {
+        epoch: runEpochRef.current,
+        ok: submitResult?.ok !== false,
+        reason: submitResult?.reason || '',
+      });
       if (!submitResult?.ok && submitResult?.reason !== 'empty_text') {
         setLocalError(submitResult.reason || 'voice_ptt_submit_failed');
       }
@@ -377,10 +554,21 @@ export function useVoiceMicToggle({
       isFlushingRef.current = false;
       setIsFlushing(false);
     }
-  }, [flushTimeoutMs, stopVad, submitPttTranscription, waitForSpeechQueue]);
+  }, [
+    capturedFrames,
+    flushTimeoutMs,
+    stopVad,
+    submitPttTranscription,
+    waitForSpeechQueue,
+    waitForSpeechQueueSettledAfterTimeout,
+  ]);
 
   const disableVoice = useCallback(
     async ({ reason = 'manual' } = {}) => {
+      logPtt('Disabling voice toggle.', {
+        reason,
+        sessionId,
+      });
       runEpochRef.current += 1;
       hotkeyPressedRef.current = false;
       isPttCapturingRef.current = false;
@@ -408,9 +596,12 @@ export function useVoiceMicToggle({
       if (mountedRef.current) {
         setCapturedFrames(0);
       }
+      logPtt('Voice toggle disabled and state cleared.', {
+        reason,
+      });
       return { ok: true };
     },
-    [stopPlayback, stopSession, stopVad],
+    [sessionId, stopPlayback, stopSession, stopVad],
   );
 
   const enableVoice = useCallback(async () => {
@@ -425,12 +616,20 @@ export function useVoiceMicToggle({
       emitFinalAck: false,
       resetSeq: true,
     });
+    logPtt('Enabling voice toggle and starting session.', {
+      sessionId: chatSessionId,
+      hotkey: normalizedHotkey,
+    });
 
     const started = await startSession({
       mode: 'vad',
       sessionId: chatSessionId,
     });
     if (!started?.ok) {
+      console.warn('[voice-ptt] Failed to enable voice toggle session.', {
+        sessionId: chatSessionId,
+        reason: started?.reason || 'unknown_reason',
+      });
       const errorMessage = started?.reason || 'voice_session_start_failed';
       setLocalError(errorMessage);
       return started;
@@ -448,9 +647,13 @@ export function useVoiceMicToggle({
     setCapturedFrames(0);
     isArmedRef.current = true;
     setIsArmed(true);
+    logPtt('Voice toggle armed for push-to-talk.', {
+      sessionId: started.sessionId || chatSessionId,
+      hotkey: normalizedHotkey,
+    });
 
     return { ok: true };
-  }, [chatSessionId, desktopMode, startSession, stopPlayback]);
+  }, [chatSessionId, desktopMode, normalizedHotkey, startSession, stopPlayback]);
 
   const toggleVoice = useCallback(async () => {
     if (isArmedRef.current) {
@@ -505,6 +708,11 @@ export function useVoiceMicToggle({
 
       hotkeyPressedRef.current = true;
       event.preventDefault();
+      logPtt('Detected PTT hotkey down.', {
+        hotkey: normalizedHotkey,
+        code: event.code,
+        key: event.key,
+      });
       void startPttCapture();
     };
 
@@ -519,6 +727,11 @@ export function useVoiceMicToggle({
 
       hotkeyPressedRef.current = false;
       event.preventDefault();
+      logPtt('Detected PTT hotkey up.', {
+        hotkey: normalizedHotkey,
+        code: event.code,
+        key: event.key,
+      });
       void stopPttCaptureAndSubmit();
     };
 
@@ -527,6 +740,9 @@ export function useVoiceMicToggle({
         return;
       }
       hotkeyPressedRef.current = false;
+      logPtt('Window blur forced a PTT stop.', {
+        hotkey: normalizedHotkey,
+      });
       void stopPttCaptureAndSubmit();
     };
 
