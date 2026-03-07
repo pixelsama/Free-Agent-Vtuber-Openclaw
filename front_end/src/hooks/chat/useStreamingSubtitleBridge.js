@@ -24,6 +24,36 @@ function normalizeSegmentId(segment = {}) {
   return '';
 }
 
+export function normalizeConversationEnvelopeEvent(event = {}) {
+  if (!event || typeof event !== 'object') {
+    return null;
+  }
+
+  const channel = typeof event.channel === 'string' ? event.channel.trim() : '';
+  const type = typeof event.type === 'string' ? event.type.trim() : '';
+  if (!channel || !type) {
+    return null;
+  }
+
+  if (channel === 'chat') {
+    return {
+      channel,
+      type,
+      payload: event.payload && typeof event.payload === 'object' ? event.payload : {},
+    };
+  }
+
+  if (channel === 'voice') {
+    return {
+      channel,
+      type,
+      payload: event,
+    };
+  }
+
+  return null;
+}
+
 export function useStreamingSubtitleBridge({
   appendDelta,
   setSegmentText,
@@ -40,6 +70,7 @@ export function useStreamingSubtitleBridge({
   const segmentModeRef = useRef(false);
 
   useEffect(() => {
+    const useConversationEnvelope = typeof onConversationEvent === 'function';
     const pendingSegments = new Map();
     const startedBeforeReady = new Map();
     const syntheticQueue = [];
@@ -186,7 +217,7 @@ export function useStreamingSubtitleBridge({
       maybeStartSyntheticPlayback();
     };
 
-    const detachSegment = onSegmentReady((segment = {}) => {
+    const handleSegmentReady = (segment = {}) => {
       const text = typeof segment.text === 'string' ? segment.text.trim() : '';
       if (!text) {
         return;
@@ -238,16 +269,16 @@ export function useStreamingSubtitleBridge({
         enqueueSyntheticSegment(segmentId, current.text);
       }, SEGMENT_READY_FALLBACK_DELAY_MS);
       pendingSegments.set(segmentId, entry);
-    });
+    };
 
-    const detachDelta = onDelta((delta) => {
+    const handleDelta = (delta) => {
       if (segmentModeRef.current) {
         return;
       }
       appendDelta(delta);
-    });
+    };
 
-    const detachDone = onDone(() => {
+    const handleDone = () => {
       streamDone = true;
 
       if (!sawTtsLifecycle) {
@@ -288,19 +319,17 @@ export function useStreamingSubtitleBridge({
 
       segmentModeRef.current = false;
       finishStream();
-    });
+    };
 
-    const detachVoice = onConversationEvent?.((event = {}) => {
-      if (!event || typeof event !== 'object') {
-        return;
-      }
+    const handleError = (error) => {
+      console.error('字幕流式输出发生错误:', error);
+      clearAllPending();
+      segmentModeRef.current = false;
+      clearSubtitle();
+      onComposerError?.(normalizeError(error));
+    };
 
-      if (event.channel && event.channel !== 'voice') {
-        return;
-      }
-
-      const voiceEvent = event;
-
+    const handleVoiceEvent = (voiceEvent = {}) => {
       if (
         voiceEvent.type !== 'segment-tts-started'
         && voiceEvent.type !== 'segment-tts-finished'
@@ -373,23 +402,53 @@ export function useStreamingSubtitleBridge({
           scheduleSubtitleClear(TTS_FAILED_HOLD_MS);
         }
       }
-    });
+    };
 
-    const detachError = onError((error) => {
-      console.error('字幕流式输出发生错误:', error);
-      clearAllPending();
-      segmentModeRef.current = false;
-      clearSubtitle();
-      onComposerError?.(normalizeError(error));
-    });
+    const detachConversation = useConversationEnvelope
+      ? onConversationEvent((event = {}) => {
+          const normalized = normalizeConversationEnvelopeEvent(event);
+          if (!normalized) {
+            return;
+          }
+
+          if (normalized.channel === 'chat') {
+            if (normalized.type === 'segment-ready') {
+              handleSegmentReady(normalized.payload);
+              return;
+            }
+
+            if (normalized.type === 'text-delta') {
+              handleDelta(normalized.payload?.content || '');
+              return;
+            }
+
+            if (normalized.type === 'done') {
+              handleDone();
+              return;
+            }
+
+            if (normalized.type === 'error') {
+              handleError(normalized.payload);
+            }
+            return;
+          }
+
+          handleVoiceEvent(normalized.payload);
+        })
+      : null;
+
+    const detachSegment = useConversationEnvelope ? null : onSegmentReady(handleSegmentReady);
+    const detachDelta = useConversationEnvelope ? null : onDelta(handleDelta);
+    const detachDone = useConversationEnvelope ? null : onDone(handleDone);
+    const detachError = useConversationEnvelope ? null : onError(handleError);
 
     return () => {
       clearAllPending();
       segmentModeRef.current = false;
+      detachConversation?.();
       detachSegment?.();
       detachDelta?.();
       detachDone?.();
-      detachVoice?.();
       detachError?.();
     };
   }, [
