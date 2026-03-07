@@ -5,6 +5,7 @@ const SEGMENT_READY_FALLBACK_DELAY_MS = 350;
 const TTS_STARTED_BUFFER_TTL_MS = 10000;
 const DEFAULT_TTS_FINISH_HOLD_MS = 280;
 const DEFAULT_TTS_FAILED_HOLD_MS = 1200;
+const PLAYBACK_SEGMENT_SWITCH_GRACE_MS = 48;
 const SYNTHETIC_STREAMING_IDLE_HOLD_MS = 800;
 const SYNTHETIC_STREAM_DONE_HOLD_MS = 500;
 const TTS_FINISH_HOLD_MS = DEFAULT_TTS_FINISH_HOLD_MS;
@@ -22,6 +23,100 @@ function normalizeSegmentId(segment = {}) {
   }
 
   return '';
+}
+
+export function createPlaybackSubtitleController({
+  setSegmentText,
+  clearSubtitle,
+  finishStream,
+  normalizeError,
+  onComposerError,
+  setSegmentMode = () => {},
+  setTimer = globalThis.setTimeout,
+  clearTimer = globalThis.clearTimeout,
+} = {}) {
+  let clearHandle = null;
+  let activePlaybackSegmentId = '';
+
+  const clearSubtitleClearTimer = () => {
+    if (clearHandle) {
+      clearTimer(clearHandle);
+      clearHandle = null;
+    }
+  };
+
+  const applySegmentText = (text) => {
+    const safeText = typeof text === 'string' ? text.trim() : '';
+    if (!safeText) {
+      return;
+    }
+
+    clearSubtitleClearTimer();
+    setSegmentMode(true);
+    setSegmentText(safeText);
+  };
+
+  const scheduleSubtitleClear = (delayMs = PLAYBACK_SEGMENT_SWITCH_GRACE_MS) => {
+    clearSubtitleClearTimer();
+    clearHandle = setTimer(() => {
+      clearHandle = null;
+      setSegmentMode(false);
+      clearSubtitle();
+    }, Math.max(0, delayMs));
+  };
+
+  return {
+    handleConversationEvent(normalizedEvent = null) {
+      if (!normalizedEvent || normalizedEvent.channel !== 'chat') {
+        return;
+      }
+
+      if (normalizedEvent.type === 'done') {
+        finishStream?.();
+        return;
+      }
+
+      if (normalizedEvent.type === 'error') {
+        clearSubtitleClearTimer();
+        activePlaybackSegmentId = '';
+        setSegmentMode(false);
+        clearSubtitle?.();
+        onComposerError?.(normalizeError?.(normalizedEvent.payload));
+      }
+    },
+    handlePlaybackEvent(playbackEvent = {}) {
+      const segmentId = normalizeSegmentId(playbackEvent);
+      if (!segmentId) {
+        if (playbackEvent.type === 'segment-playback-reset') {
+          clearSubtitleClearTimer();
+          activePlaybackSegmentId = '';
+          setSegmentMode(false);
+          clearSubtitle?.();
+        }
+        return;
+      }
+
+      if (playbackEvent.type === 'segment-playback-started') {
+        activePlaybackSegmentId = segmentId;
+        applySegmentText(playbackEvent.text);
+        return;
+      }
+
+      if (
+        (playbackEvent.type === 'segment-playback-finished'
+          || playbackEvent.type === 'segment-playback-failed')
+        && activePlaybackSegmentId === segmentId
+      ) {
+        activePlaybackSegmentId = '';
+        scheduleSubtitleClear();
+      }
+    },
+    dispose() {
+      clearSubtitleClearTimer();
+      activePlaybackSegmentId = '';
+      setSegmentMode(false);
+    },
+  };
 }
 
 export function normalizeConversationEnvelopeEvent(event = {}) {
@@ -64,6 +159,8 @@ export function useStreamingSubtitleBridge({
   onDone,
   onError,
   onConversationEvent,
+  onPlaybackEvent,
+  syncToPlayback = false,
   normalizeError,
   onComposerError,
 }) {
@@ -71,14 +168,63 @@ export function useStreamingSubtitleBridge({
 
   useEffect(() => {
     const useConversationEnvelope = typeof onConversationEvent === 'function';
+    const playbackSyncEnabled = Boolean(syncToPlayback && typeof onPlaybackEvent === 'function');
+
+    if (playbackSyncEnabled) {
+      const playbackController = createPlaybackSubtitleController({
+        setSegmentText,
+        clearSubtitle,
+        finishStream,
+        normalizeError,
+        onComposerError,
+        setSegmentMode: (value) => {
+          segmentModeRef.current = value;
+        },
+      });
+
+      const detachConversation = useConversationEnvelope
+        ? onConversationEvent((event = {}) => {
+            const normalized = normalizeConversationEnvelopeEvent(event);
+            playbackController.handleConversationEvent(normalized);
+          })
+        : null;
+      const detachPlayback = onPlaybackEvent((event = {}) => {
+        playbackController.handlePlaybackEvent(event);
+      });
+      const detachDone = useConversationEnvelope ? null : onDone(() => {
+        playbackController.handleConversationEvent({
+          channel: 'chat',
+          type: 'done',
+          payload: {},
+        });
+      });
+      const detachError = useConversationEnvelope ? null : onError((error) => {
+        playbackController.handleConversationEvent({
+          channel: 'chat',
+          type: 'error',
+          payload: error,
+        });
+      });
+
+      return () => {
+        playbackController.dispose();
+        detachConversation?.();
+        detachPlayback?.();
+        detachDone?.();
+        detachError?.();
+      };
+    }
+
     const pendingSegments = new Map();
     const startedBeforeReady = new Map();
     const syntheticQueue = [];
     let clearTimer = null;
     let syntheticPlaybackTimer = null;
     let activeSyntheticSegmentId = '';
+    let activePlaybackSegmentId = '';
     let streamDone = false;
     let sawTtsLifecycle = false;
+    let sawActualPlaybackLifecycle = false;
 
     const clearPendingTimer = (entry) => {
       if (entry?.fallbackTimer) {
@@ -134,6 +280,8 @@ export function useStreamingSubtitleBridge({
       startedBeforeReady.clear();
       syntheticQueue.length = 0;
       activeSyntheticSegmentId = '';
+      activePlaybackSegmentId = '';
+      sawActualPlaybackLifecycle = false;
       clearSyntheticPlaybackTimer();
       clearSubtitleClearTimer();
     };
@@ -346,6 +494,34 @@ export function useStreamingSubtitleBridge({
       pruneStartedBeforeReady();
       const entry = pendingSegments.get(segmentId);
 
+      if (typeof onPlaybackEvent === 'function') {
+        if (voiceEvent.type === 'segment-tts-started' && !entry) {
+          startedBeforeReady.set(segmentId, {
+            text: typeof voiceEvent.text === 'string' ? voiceEvent.text.trim() : '',
+            at: Date.now(),
+          });
+        }
+
+        if (voiceEvent.type === 'segment-tts-failed') {
+          const fallbackText =
+            typeof voiceEvent.text === 'string' && voiceEvent.text.trim()
+              ? voiceEvent.text
+              : entry?.text || '';
+          if (fallbackText && !sawActualPlaybackLifecycle) {
+            applySegmentText(fallbackText);
+          }
+          if (entry) {
+            clearPendingTimer(entry);
+            pendingSegments.delete(segmentId);
+          }
+          if (activePlaybackSegmentId === segmentId) {
+            activePlaybackSegmentId = '';
+            scheduleSubtitleClear(0);
+          }
+        }
+        return;
+      }
+
       if (voiceEvent.type === 'segment-tts-started') {
         if (!sawTtsLifecycle) {
           sawTtsLifecycle = true;
@@ -404,6 +580,65 @@ export function useStreamingSubtitleBridge({
       }
     };
 
+    const handlePlaybackEvent = (playbackEvent = {}) => {
+      const segmentId = normalizeSegmentId(playbackEvent);
+      if (!segmentId) {
+        if (playbackEvent.type === 'segment-playback-reset') {
+          clearAllPending();
+          segmentModeRef.current = false;
+          clearSubtitle();
+        }
+        return;
+      }
+
+      pruneStartedBeforeReady();
+      const entry = pendingSegments.get(segmentId);
+
+      if (playbackEvent.type === 'segment-playback-started') {
+        sawActualPlaybackLifecycle = true;
+        clearSubtitleClearTimer();
+        const bufferedStarted = startedBeforeReady.get(segmentId);
+        if (bufferedStarted) {
+          startedBeforeReady.delete(segmentId);
+        }
+
+        if (entry) {
+          clearPendingTimer(entry);
+          pendingSegments.set(segmentId, {
+            ...entry,
+            ttsStarted: true,
+            syntheticQueued: false,
+            fallbackTimer: null,
+          });
+        }
+
+        removeSyntheticQueueEntry(segmentId);
+        activePlaybackSegmentId = segmentId;
+        applySegmentText(
+          typeof playbackEvent.text === 'string' && playbackEvent.text.trim()
+            ? playbackEvent.text
+            : bufferedStarted?.text || entry?.text || '',
+        );
+        return;
+      }
+
+      if (entry) {
+        clearPendingTimer(entry);
+        pendingSegments.delete(segmentId);
+      }
+      startedBeforeReady.delete(segmentId);
+
+      if (
+        playbackEvent.type === 'segment-playback-finished'
+        || playbackEvent.type === 'segment-playback-failed'
+      ) {
+        if (activePlaybackSegmentId === segmentId) {
+          activePlaybackSegmentId = '';
+          scheduleSubtitleClear(0);
+        }
+      }
+    };
+
     const detachConversation = useConversationEnvelope
       ? onConversationEvent((event = {}) => {
           const normalized = normalizeConversationEnvelopeEvent(event);
@@ -436,6 +671,7 @@ export function useStreamingSubtitleBridge({
           handleVoiceEvent(normalized.payload);
         })
       : null;
+    const detachPlayback = typeof onPlaybackEvent === 'function' ? onPlaybackEvent(handlePlaybackEvent) : null;
 
     const detachSegment = useConversationEnvelope ? null : onSegmentReady(handleSegmentReady);
     const detachDelta = useConversationEnvelope ? null : onDelta(handleDelta);
@@ -446,6 +682,7 @@ export function useStreamingSubtitleBridge({
       clearAllPending();
       segmentModeRef.current = false;
       detachConversation?.();
+      detachPlayback?.();
       detachSegment?.();
       detachDelta?.();
       detachDone?.();
@@ -463,5 +700,7 @@ export function useStreamingSubtitleBridge({
     onDone,
     onError,
     onConversationEvent,
+    onPlaybackEvent,
+    syncToPlayback,
   ]);
 }

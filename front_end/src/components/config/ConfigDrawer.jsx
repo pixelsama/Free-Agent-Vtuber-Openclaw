@@ -95,6 +95,7 @@ export default function ConfigDrawer({
   nanobotDebugLogs = [],
   onClearNanobotDebugLogs,
   onOpenDownloadCenter,
+  onBuiltinTtsEnabledChange,
 }) {
   const { language, setLanguage, t } = useI18n();
   const { themeMode, setThemeMode } = useThemeMode();
@@ -446,6 +447,7 @@ export default function ConfigDrawer({
               <VoiceSettingsPanel
                 desktopMode={desktopMode}
                 onOpenDownloadCenter={onOpenDownloadCenter}
+                onBuiltinTtsEnabledChange={onBuiltinTtsEnabledChange}
               />
             )}
 

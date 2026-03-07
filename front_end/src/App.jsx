@@ -14,6 +14,7 @@ import { usePetCursorTracking } from './hooks/pet/usePetCursorTracking.js';
 import { useChatBackendSettings } from './hooks/settings/useOpenClawSettings.js';
 import { usePlatformInfo } from './hooks/window/usePlatformInfo.js';
 import { useVoiceMicToggle } from './hooks/voice/useVoiceMicToggle.js';
+import { subscribeTtsPlaybackLifecycle } from './hooks/voice/ttsPlaybackLifecycle.js';
 import { buildVoiceStreamRequest } from './hooks/voice/voiceStreamRequest.js';
 import { ModeProvider, MODE_PET, MODE_WINDOW, useModeContext } from './mode/ModeContext.jsx';
 import MainShell from './shells/MainShell.jsx';
@@ -37,6 +38,7 @@ function AppContent({ desktopMode }) {
   const [motions, setMotions] = useState([]);
   const [expressions, setExpressions] = useState([]);
   const [nanobotDebugLogs, setNanobotDebugLogs] = useState([]);
+  const [builtinTtsEnabled, setBuiltinTtsEnabled] = useState(false);
   const platform = usePlatformInfo({ desktopMode });
 
   const { subtitleText, appendDelta, setSegmentText, finishStream, clearSubtitle, beginStream } = useSubtitleFeed();
@@ -174,6 +176,42 @@ function AppContent({ desktopMode }) {
     setNanobotDebugLogs([]);
   }, []);
 
+  const syncBuiltinTtsEnabled = useCallback((result = {}) => {
+    const selectedTtsBundleId =
+      typeof result?.selectedTtsBundleId === 'string' ? result.selectedTtsBundleId.trim() : '';
+    setBuiltinTtsEnabled(Boolean(result?.ok && selectedTtsBundleId));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!desktopMode) {
+      setBuiltinTtsEnabled(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadVoiceModelSelection = async () => {
+      try {
+        const result = await desktopBridge.voiceModels.list();
+        if (!cancelled) {
+          syncBuiltinTtsEnabled(result);
+        }
+      } catch {
+        if (!cancelled) {
+          setBuiltinTtsEnabled(false);
+        }
+      }
+    };
+
+    void loadVoiceModelSelection();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopMode, syncBuiltinTtsEnabled]);
+
   const handleInstallNanobotRuntime = useCallback(async () => {
     ensureDownloadTask({
       taskId: 'nanobot-runtime',
@@ -251,6 +289,8 @@ function AppContent({ desktopMode }) {
     onDone,
     onError,
     onConversationEvent,
+    onPlaybackEvent: builtinTtsEnabled ? subscribeTtsPlaybackLifecycle : null,
+    syncToPlayback: builtinTtsEnabled,
     normalizeError,
     onComposerError: setComposerExternalError,
   });
@@ -395,6 +435,7 @@ function AppContent({ desktopMode }) {
         nanobotDebugLogs={nanobotDebugLogs}
         onClearNanobotDebugLogs={clearNanobotDebugLogs}
         onOpenDownloadCenter={openDownloadTask}
+        onBuiltinTtsEnabledChange={syncBuiltinTtsEnabled}
       />
       <UnifiedDownloadDialog
         open={downloadDialogOpen}

@@ -293,7 +293,11 @@ async function captureAsrTestPcm({ durationMs = ASR_TEST_RECORD_MS, sampleRate =
   return bytes;
 }
 
-export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownloadCenter }) {
+export default function VoiceSettingsPanel({
+  desktopMode = false,
+  onOpenDownloadCenter,
+  onBuiltinTtsEnabledChange,
+}) {
   const { t } = useI18n();
   const mountedRef = useRef(true);
   const progressEstimatorRef = useRef({
@@ -387,18 +391,22 @@ export default function VoiceSettingsPanel({ desktopMode = false, onOpenDownload
 
   const applyVoiceModelList = useCallback((result = {}) => {
     const bundles = Array.isArray(result.bundles) ? result.bundles : [];
+    const nextSelectedTtsBundleId =
+      typeof result.selectedTtsBundleId === 'string'
+        ? result.selectedTtsBundleId
+        : (typeof result.selectedBundleId === 'string' ? result.selectedBundleId : '');
     setModelBundles(bundles);
     setSelectedAsrBundleId(
       typeof result.selectedAsrBundleId === 'string'
         ? result.selectedAsrBundleId
         : (typeof result.selectedBundleId === 'string' ? result.selectedBundleId : ''),
     );
-    setSelectedTtsBundleId(
-      typeof result.selectedTtsBundleId === 'string'
-        ? result.selectedTtsBundleId
-        : (typeof result.selectedBundleId === 'string' ? result.selectedBundleId : ''),
-    );
-  }, []);
+    setSelectedTtsBundleId(nextSelectedTtsBundleId);
+    onBuiltinTtsEnabledChange?.({
+      ...result,
+      selectedTtsBundleId: nextSelectedTtsBundleId,
+    });
+  }, [onBuiltinTtsEnabledChange]);
 
   const loadVoiceModels = useCallback(async () => {
     if (!desktopMode) {
