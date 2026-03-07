@@ -56,11 +56,11 @@ test('buildSherpaOnnxOptionsFromEnv maps env values', () => {
 
 test('buildPythonAsrOptionsFromEnv maps env values', () => {
   const options = buildPythonAsrOptionsFromEnv({
-    VOICE_PYTHON_EXECUTABLE: '/tmp/python',
-    VOICE_PYTHON_BRIDGE_SCRIPT: '/tmp/bridge.py',
+    VOICE_ASR_PYTHON_EXECUTABLE: '/tmp/python',
+    VOICE_ASR_PYTHON_BRIDGE_SCRIPT: '/tmp/bridge.py',
     VOICE_ASR_PYTHON_MODEL_DIR: '/tmp/asr',
     VOICE_ASR_PYTHON_LANGUAGE: '中文',
-    VOICE_PYTHON_DEVICE: 'cpu',
+    VOICE_ASR_PYTHON_DEVICE: 'cpu',
     VOICE_ASR_PYTHON_TIMEOUT_MS: '60000',
   });
 

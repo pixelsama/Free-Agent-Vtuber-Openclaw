@@ -50,8 +50,8 @@ test('buildSherpaOnnxTtsOptionsFromEnv maps env values', () => {
 
 test('buildPythonTtsOptionsFromEnv maps env values', () => {
   const options = buildPythonTtsOptionsFromEnv({
-    VOICE_PYTHON_EXECUTABLE: '/tmp/python',
-    VOICE_PYTHON_BRIDGE_SCRIPT: '/tmp/bridge.py',
+    VOICE_TTS_PYTHON_EXECUTABLE: '/tmp/python',
+    VOICE_TTS_PYTHON_BRIDGE_SCRIPT: '/tmp/bridge.py',
     VOICE_TTS_PYTHON_WORKER_SCRIPT: '/tmp/tts_worker.py',
     VOICE_TTS_PYTHON_ENGINE: 'qwen3-mlx',
     VOICE_TTS_PYTHON_MODEL_DIR: '/tmp/tts',
@@ -63,7 +63,7 @@ test('buildPythonTtsOptionsFromEnv maps env values', () => {
     VOICE_TTS_PYTHON_EDGE_RATE: '+0%',
     VOICE_TTS_PYTHON_EDGE_PITCH: '+0Hz',
     VOICE_TTS_PYTHON_EDGE_VOLUME: '+0%',
-    VOICE_PYTHON_DEVICE: 'cpu',
+    VOICE_TTS_PYTHON_DEVICE: 'cpu',
     VOICE_TTS_PYTHON_STREAM: '1',
     VOICE_TTS_PYTHON_STREAMING_INTERVAL: '0.4',
     VOICE_TTS_PYTHON_TEMPERATURE: '0.9',

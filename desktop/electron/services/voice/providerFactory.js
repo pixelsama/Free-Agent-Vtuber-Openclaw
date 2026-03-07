@@ -118,19 +118,19 @@ function buildSherpaOnnxTtsOptionsFromEnv(env = process.env) {
 
 function buildPythonAsrOptionsFromEnv(env = process.env) {
   return {
-    pythonExecutable: env.VOICE_PYTHON_EXECUTABLE || env.VOICE_PYTHON_BIN,
-    bridgeScriptPath: env.VOICE_PYTHON_BRIDGE_SCRIPT,
+    pythonExecutable: env.VOICE_ASR_PYTHON_EXECUTABLE,
+    bridgeScriptPath: env.VOICE_ASR_PYTHON_BRIDGE_SCRIPT,
     modelDir: env.VOICE_ASR_PYTHON_MODEL_DIR || env.VOICE_ASR_PYTHON_MODEL,
     language: env.VOICE_ASR_PYTHON_LANGUAGE,
-    device: env.VOICE_ASR_PYTHON_DEVICE || env.VOICE_PYTHON_DEVICE,
+    device: env.VOICE_ASR_PYTHON_DEVICE,
     timeoutMs: env.VOICE_ASR_PYTHON_TIMEOUT_MS,
   };
 }
 
 function buildPythonTtsOptionsFromEnv(env = process.env) {
   return {
-    pythonExecutable: env.VOICE_PYTHON_EXECUTABLE || env.VOICE_PYTHON_BIN,
-    bridgeScriptPath: env.VOICE_PYTHON_BRIDGE_SCRIPT,
+    pythonExecutable: env.VOICE_TTS_PYTHON_EXECUTABLE,
+    bridgeScriptPath: env.VOICE_TTS_PYTHON_BRIDGE_SCRIPT,
     workerScriptPath: env.VOICE_TTS_PYTHON_WORKER_SCRIPT,
     engine: env.VOICE_TTS_PYTHON_ENGINE,
     modelDir: env.VOICE_TTS_PYTHON_MODEL_DIR || env.VOICE_TTS_PYTHON_MODEL,
@@ -143,7 +143,7 @@ function buildPythonTtsOptionsFromEnv(env = process.env) {
     edgeRate: env.VOICE_TTS_PYTHON_EDGE_RATE,
     edgePitch: env.VOICE_TTS_PYTHON_EDGE_PITCH,
     edgeVolume: env.VOICE_TTS_PYTHON_EDGE_VOLUME,
-    device: env.VOICE_TTS_PYTHON_DEVICE || env.VOICE_PYTHON_DEVICE,
+    device: env.VOICE_TTS_PYTHON_DEVICE,
     stream: env.VOICE_TTS_PYTHON_STREAM,
     streamingInterval: env.VOICE_TTS_PYTHON_STREAMING_INTERVAL,
     temperature: env.VOICE_TTS_PYTHON_TEMPERATURE,

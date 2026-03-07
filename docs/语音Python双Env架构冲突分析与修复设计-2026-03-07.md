@@ -391,26 +391,26 @@ TTS：
 3. `VOICE_TTS_PYTHON_DEVICE`
 4. `VOICE_TTS_PYTHON_WORKER_SCRIPT`
 
-### 11.2 兼容策略
+### 11.2 破坏式切换策略
 
-为避免一次性打断旧逻辑，建议保留兼容回退顺序：
+本项目当前未发布，建议直接去掉旧字段兼容，执行一次性切换：
 
 ASR：
 
-1. 先读 `VOICE_ASR_PYTHON_EXECUTABLE`
-2. 再回退 `VOICE_PYTHON_EXECUTABLE`
-3. 最后回退 `VOICE_PYTHON_BIN`
+1. 只读取 `VOICE_ASR_PYTHON_EXECUTABLE`
+2. 不再读取 `VOICE_PYTHON_EXECUTABLE`
+3. 不再读取 `VOICE_PYTHON_BIN`
 
 TTS：
 
-1. 先读 `VOICE_TTS_PYTHON_EXECUTABLE`
-2. 再回退 `VOICE_PYTHON_EXECUTABLE`
-3. 最后回退 `VOICE_PYTHON_BIN`
+1. 只读取 `VOICE_TTS_PYTHON_EXECUTABLE`
+2. 不再读取 `VOICE_PYTHON_EXECUTABLE`
+3. 不再读取 `VOICE_PYTHON_BIN`
 
-这样可以：
+切换后要求：
 
-1. 保持旧测试和老配置短期可用
-2. 逐步迁移到 capability 级 env
+1. 配置缺失时必须立即失败并返回明确错误（fail fast）
+2. 全量测试、示例配置、安装流程同步更新到新字段
 
 ## 12. 预期的组件改造点
 
@@ -425,8 +425,9 @@ TTS：
 
 改造目标：
 
-1. `buildPythonAsrOptionsFromEnv()` 优先读取 ASR 专属字段
-2. `buildPythonTtsOptionsFromEnv()` 优先读取 TTS 专属字段
+1. `buildPythonAsrOptionsFromEnv()` 只读取 ASR 专属字段
+2. `buildPythonTtsOptionsFromEnv()` 只读取 TTS 专属字段
+3. 删除对 `VOICE_PYTHON_EXECUTABLE` / `VOICE_PYTHON_BIN` 的回退读取
 
 ### 12.3 `asrWorkerProcess.js` / `providers/asr/pythonProvider.js`
 
@@ -434,6 +435,7 @@ TTS：
 
 1. 改为消费 ASR 专属 Python executable / bridge script / device
 2. 不再依赖 TTS 的 Python env
+3. 不再支持全局 Python executable 回退
 
 ### 12.4 `ttsWorkerProcess.js` / `providers/tts/pythonProvider.js`
 
@@ -441,6 +443,7 @@ TTS：
 
 1. 改为消费 TTS 专属 Python executable / bridge script / worker script / device
 2. 不再影响 ASR 的 Python executable
+3. 不再支持全局 Python executable 回退
 
 ### 12.5 `voiceSession.js`
 

@@ -540,12 +540,11 @@ function toEnvProviderName(value) {
 }
 
 function buildAsrRunnerOptions() {
-  const pythonExecutable =
-    normalizePath(runtimeEnv.VOICE_PYTHON_EXECUTABLE) || normalizePath(runtimeEnv.VOICE_PYTHON_BIN);
+  const pythonExecutable = normalizePath(runtimeEnv.VOICE_ASR_PYTHON_EXECUTABLE);
   const modelDir =
     normalizePath(runtimeEnv.VOICE_ASR_PYTHON_MODEL_DIR) || normalizePath(runtimeEnv.VOICE_ASR_PYTHON_MODEL);
   const language = normalizePath(runtimeEnv.VOICE_ASR_PYTHON_LANGUAGE) || 'auto';
-  const device = normalizePath(runtimeEnv.VOICE_ASR_PYTHON_DEVICE) || normalizePath(runtimeEnv.VOICE_PYTHON_DEVICE) || 'auto';
+  const device = normalizePath(runtimeEnv.VOICE_ASR_PYTHON_DEVICE) || 'auto';
   const timeoutMs = Math.max(1000, toPositiveInteger(runtimeEnv.VOICE_ASR_PYTHON_TIMEOUT_MS, 120000));
   const workerScriptPath = normalizePath(runtimeEnv.VOICE_ASR_PYTHON_WORKER_SCRIPT);
   let resolvedWorkerScriptPath = '';
@@ -553,7 +552,7 @@ function buildAsrRunnerOptions() {
 
   ensurePathExists(
     pythonExecutable,
-    'VOICE_PYTHON_EXECUTABLE',
+    'VOICE_ASR_PYTHON_EXECUTABLE',
     'voice_asr_python_not_configured',
     'voice_asr_python_missing',
   );

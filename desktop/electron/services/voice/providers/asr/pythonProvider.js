@@ -289,13 +289,13 @@ function createPythonAsrProvider({ options = {} } = {}) {
 
       ensurePathExists(
         pythonExecutable,
-        'VOICE_PYTHON_EXECUTABLE',
+        'VOICE_ASR_PYTHON_EXECUTABLE',
         'voice_asr_python_not_configured',
         'voice_asr_python_missing',
       );
       ensurePathExists(
         bridgeScriptPath,
-        'VOICE_PYTHON_BRIDGE_SCRIPT',
+        'VOICE_ASR_PYTHON_BRIDGE_SCRIPT',
         'voice_asr_python_bridge_not_configured',
         'voice_asr_python_bridge_missing',
       );

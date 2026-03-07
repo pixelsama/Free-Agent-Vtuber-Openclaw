@@ -1662,16 +1662,8 @@ class VoiceModelLibrary {
       return null;
     };
 
-    const pythonRuntime = resolvePythonRuntime(selectedTtsBundle) || resolvePythonRuntime(selectedAsrBundle);
-    if (pythonRuntime) {
-      env.VOICE_PYTHON_EXECUTABLE = pythonRuntime.resolvedPythonExecutable;
-      if (pythonRuntime.bridgeScriptPath) {
-        env.VOICE_PYTHON_BRIDGE_SCRIPT = pythonRuntime.bridgeScriptPath;
-      }
-      if (pythonRuntime.device) {
-        env.VOICE_PYTHON_DEVICE = pythonRuntime.device;
-      }
-    }
+    const asrPythonRuntime = resolvePythonRuntime(selectedAsrBundle);
+    const ttsPythonRuntime = resolvePythonRuntime(selectedTtsBundle);
 
     if (selectedAsrBundle) {
       if (
@@ -1680,6 +1672,15 @@ class VoiceModelLibrary {
       ) {
         const runtime = selectedAsrBundle.runtime;
         env.VOICE_ASR_PROVIDER = 'python';
+        if (asrPythonRuntime?.resolvedPythonExecutable) {
+          env.VOICE_ASR_PYTHON_EXECUTABLE = asrPythonRuntime.resolvedPythonExecutable;
+        }
+        if (asrPythonRuntime?.bridgeScriptPath) {
+          env.VOICE_ASR_PYTHON_BRIDGE_SCRIPT = asrPythonRuntime.bridgeScriptPath;
+        }
+        if (runtime.device) {
+          env.VOICE_ASR_PYTHON_DEVICE = runtime.device;
+        }
         env.VOICE_ASR_PYTHON_MODEL_DIR = runtime.asrModelDir;
         if (runtime.asrLanguage) {
           env.VOICE_ASR_PYTHON_LANGUAGE = runtime.asrLanguage;
@@ -1700,6 +1701,15 @@ class VoiceModelLibrary {
       ) {
         const runtime = selectedTtsBundle.runtime;
         env.VOICE_TTS_PROVIDER = 'python';
+        if (ttsPythonRuntime?.resolvedPythonExecutable) {
+          env.VOICE_TTS_PYTHON_EXECUTABLE = ttsPythonRuntime.resolvedPythonExecutable;
+        }
+        if (ttsPythonRuntime?.bridgeScriptPath) {
+          env.VOICE_TTS_PYTHON_BRIDGE_SCRIPT = ttsPythonRuntime.bridgeScriptPath;
+        }
+        if (runtime.device) {
+          env.VOICE_TTS_PYTHON_DEVICE = runtime.device;
+        }
         if (runtime.ttsEngine) {
           env.VOICE_TTS_PYTHON_ENGINE = runtime.ttsEngine;
         }

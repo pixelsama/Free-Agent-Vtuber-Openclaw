@@ -755,7 +755,7 @@ function createPythonTtsProvider(
   }) => {
     ensurePathExists(
       pythonExecutable,
-      'VOICE_PYTHON_EXECUTABLE',
+      'VOICE_TTS_PYTHON_EXECUTABLE',
       'voice_tts_python_not_configured',
       'voice_tts_python_missing',
       existsSync,
@@ -763,7 +763,7 @@ function createPythonTtsProvider(
     if (requireBridgeScript) {
       ensurePathExists(
         bridgeScriptPath,
-        'VOICE_PYTHON_BRIDGE_SCRIPT',
+        'VOICE_TTS_PYTHON_BRIDGE_SCRIPT',
         'voice_tts_python_bridge_not_configured',
         'voice_tts_python_bridge_missing',
         existsSync,
