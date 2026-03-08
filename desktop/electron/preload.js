@@ -181,6 +181,21 @@ const live2dModels = {
   },
 };
 
+const capture = {
+  beginWindowCapture() {
+    return ipcRenderer.invoke('capture:window:begin');
+  },
+  finishWindowCapture() {
+    return ipcRenderer.invoke('capture:window:finish');
+  },
+  save(request) {
+    return ipcRenderer.invoke('capture:save', request);
+  },
+  release(request) {
+    return ipcRenderer.invoke('capture:release', request);
+  },
+};
+
 const voiceModels = {
   catalog() {
     return ipcRenderer.invoke('voice-models:catalog');
@@ -215,4 +230,5 @@ contextBridge.exposeInMainWorld('desktop', {
   voice,
   live2dModels,
   voiceModels,
+  capture,
 });

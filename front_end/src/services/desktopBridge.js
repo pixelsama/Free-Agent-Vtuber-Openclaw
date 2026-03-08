@@ -589,6 +589,36 @@ export const desktopBridge = {
       return api.nanobotDebug.onLog(handler);
     },
   },
+  capture: {
+    beginWindowCapture() {
+      const api = getDesktopApi();
+      if (!api?.capture?.beginWindowCapture) {
+        return Promise.resolve({ ok: false, reason: 'desktop_capture_unavailable' });
+      }
+      return api.capture.beginWindowCapture();
+    },
+    finishWindowCapture() {
+      const api = getDesktopApi();
+      if (!api?.capture?.finishWindowCapture) {
+        return Promise.resolve({ ok: false, reason: 'desktop_capture_unavailable' });
+      }
+      return api.capture.finishWindowCapture();
+    },
+    save(request = {}) {
+      const api = getDesktopApi();
+      if (!api?.capture?.save) {
+        return Promise.resolve({ ok: false, reason: 'desktop_capture_unavailable' });
+      }
+      return api.capture.save(request);
+    },
+    release(request = {}) {
+      const api = getDesktopApi();
+      if (!api?.capture?.release) {
+        return Promise.resolve({ ok: false, reason: 'desktop_capture_unavailable' });
+      }
+      return api.capture.release(request);
+    },
+  },
   mode: {
     async getCurrent() {
       const api = getDesktopApi();

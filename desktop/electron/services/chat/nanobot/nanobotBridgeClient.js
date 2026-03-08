@@ -425,7 +425,7 @@ function createNanobotBridgeClient({
     return `nanobot-${Date.now().toString(36)}-${requestSeq.toString(36)}`;
   };
 
-  const start = async ({ sessionId, content, config, signal, onEvent }) => {
+  const start = async ({ sessionId, content, mediaPaths = [], config, signal, onEvent }) => {
     await ensureReady();
 
     const requestId = nextRequestId();
@@ -433,6 +433,7 @@ function createNanobotBridgeClient({
       requestId,
       sessionId,
       content,
+      mediaPaths,
       config,
     });
     return new Promise((resolve, reject) => {
@@ -475,6 +476,7 @@ function createNanobotBridgeClient({
           requestId,
           sessionId,
           content,
+          mediaPaths: Array.isArray(mediaPaths) ? mediaPaths : [],
           config,
         });
       } catch (error) {

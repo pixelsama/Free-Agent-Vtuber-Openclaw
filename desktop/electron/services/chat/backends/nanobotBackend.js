@@ -106,9 +106,10 @@ function shouldForwardNanobotProgress(value) {
 }
 
 class NanobotBackendAdapter extends ChatBackendAdapter {
-  constructor({ bridgeClient, resolveRuntime, emitDebugLog } = {}) {
+  constructor({ bridgeClient, resolveRuntime, resolveCapture, emitDebugLog } = {}) {
     super('nanobot');
     this.emitDebugLog = typeof emitDebugLog === 'function' ? emitDebugLog : null;
+    this.resolveCapture = typeof resolveCapture === 'function' ? resolveCapture : null;
     this.bridgeClient = bridgeClient || createNanobotBridgeClient({
       resolveLaunchConfig: resolveRuntime,
       emitDebugLog,
@@ -150,17 +151,36 @@ class NanobotBackendAdapter extends ChatBackendAdapter {
     return this.bridgeClient.testConnection({ config });
   }
 
-  async startStream({ settings, sessionId, content, signal, onEvent }) {
+  async startStream({ settings, sessionId, content, options = {}, signal, onEvent }) {
     const config = normalizeNanobotConfig(settings);
+    const mediaPaths = [];
+    const attachments = Array.isArray(options?.attachments) ? options.attachments : [];
+    for (const attachment of attachments) {
+      if (attachment?.kind !== 'capture-image') {
+        continue;
+      }
+      const captureId = normalizeString(attachment.captureId);
+      if (!captureId || !this.resolveCapture) {
+        continue;
+      }
+      const capture = this.resolveCapture(captureId);
+      if (!capture?.filePath) {
+        throw createNanobotError('capture_not_found', '截图文件不存在或已过期。');
+      }
+      mediaPaths.push(capture.filePath);
+    }
     let visibleText = '';
     this.debug('start-request', 'Starting Nanobot stream.', {
       sessionId,
       content,
+      attachmentCount: attachments.length,
+      mediaPaths,
       config: redactNanobotConfig(config),
     });
     return this.bridgeClient.start({
       sessionId,
       content,
+      mediaPaths,
       signal,
       config,
       onEvent: (event) => {

@@ -89,6 +89,7 @@ def load_nanobot_modules() -> dict[str, Any]:
     try:
         from nanobot.agent.loop import AgentLoop
         from nanobot.agent.context import ContextBuilder
+        from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
         from nanobot.config.schema import ExecToolConfig
         from nanobot.providers.custom_provider import CustomProvider
@@ -103,6 +104,7 @@ def load_nanobot_modules() -> dict[str, Any]:
     return {
         "AgentLoop": AgentLoop,
         "ContextBuilder": ContextBuilder,
+        "InboundMessage": InboundMessage,
         "MessageBus": MessageBus,
         "ExecToolConfig": ExecToolConfig,
         "CustomProvider": CustomProvider,
@@ -237,7 +239,13 @@ def first_progress_block(content: str) -> str:
     return first_block
 
 
-async def handle_start(request_id: str, session_id: str, content: str, config: dict[str, Any]) -> None:
+async def handle_start(
+    request_id: str,
+    session_id: str,
+    content: str,
+    media_paths: list[str],
+    config: dict[str, Any],
+) -> None:
     try:
         if not content:
             raise BridgeError("nanobot_missing_config", "Chat content is required.")
@@ -247,6 +255,7 @@ async def handle_start(request_id: str, session_id: str, content: str, config: d
             raise BridgeError("nanobot_missing_config", "Nanobot API Key is required.")
 
         agent = get_or_create_agent(normalized)
+        inbound_message_cls = load_nanobot_modules()["InboundMessage"]
         has_visible_progress = False
 
         async def on_progress(progress_content: str, *, tool_hint: bool = False) -> None:
@@ -290,15 +299,19 @@ async def handle_start(request_id: str, session_id: str, content: str, config: d
                 }
             )
 
-        response = await agent.process_direct(
-            content=content,
-            session_key=f"desktop:{session_id or 'default'}",
-            channel="desktop",
-            chat_id=session_id or "default",
+        response = await agent._process_message(
+            inbound_message_cls(
+                channel="desktop",
+                sender_id="user",
+                chat_id=session_id or "default",
+                content=content,
+                media=list(media_paths or []),
+                metadata={},
+            ),
             on_progress=on_progress,
         )
 
-        final_text = normalize_string(response)
+        final_text = normalize_string(response.content if response is not None else "")
         if final_text:
             emit(
                 {
@@ -415,8 +428,10 @@ async def process_message(payload: dict[str, Any]) -> None:
     if msg_type == "start":
         session_id = normalize_string(payload.get("sessionId"), "default")
         content = normalize_string(payload.get("content"))
+        media_paths = payload.get("mediaPaths") if isinstance(payload.get("mediaPaths"), list) else []
+        media_paths = [normalize_string(item) for item in media_paths if normalize_string(item)]
         config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
-        task = asyncio.create_task(handle_start(request_id, session_id, content, config))
+        task = asyncio.create_task(handle_start(request_id, session_id, content, media_paths, config))
         ACTIVE_TASKS[request_id] = task
         task.add_done_callback(lambda _: ACTIVE_TASKS.pop(request_id, None))
         return

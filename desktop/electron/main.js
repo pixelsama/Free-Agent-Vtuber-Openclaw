@@ -6,6 +6,7 @@ const { registerConversationIpc } = require('./ipc/conversation');
 const { registerLive2DModelsIpc } = require('./ipc/live2dModels');
 const { registerNanobotRuntimeIpc } = require('./ipc/nanobotRuntime');
 const { registerSettingsIpc } = require('./ipc/settings');
+const { registerScreenshotCaptureIpc } = require('./ipc/screenshotCapture');
 const { registerVoiceModelsIpc } = require('./ipc/voiceModels');
 const { registerVoiceSessionIpc } = require('./ipc/voiceSession');
 const { createConversationRuntime } = require('./services/chat/conversationRuntime');
@@ -17,6 +18,7 @@ const { Live2DModelLibrary, MODEL_PROTOCOL } = require('./services/live2dModelLi
 const { PythonEnvManager } = require('./services/python/pythonEnvManager');
 const { PythonRuntimeManager } = require('./services/python/pythonRuntimeManager');
 const { SettingsStore } = require('./services/settingsStore');
+const { ScreenshotCaptureService } = require('./services/screenshotCaptureService');
 const { VoiceModelLibrary } = require('./services/voice/voiceModelLibrary');
 const { WindowModeManager } = require('./window/windowModeManager');
 const { TrayManager } = require('./window/trayManager');
@@ -43,12 +45,14 @@ let disposeLive2DModelsHandlers = null;
 let disposeNanobotRuntimeHandlers = null;
 let disposeVoiceModelsHandlers = null;
 let disposeVoiceSessionHandlers = null;
+let disposeScreenshotCaptureHandlers = null;
 let startChatStreamFromMain = null;
 let conversationRuntime = null;
 let settingsStore = null;
 let windowModeManager = null;
 let trayManager = null;
 let live2dModelLibrary = null;
+let screenshotCaptureService = null;
 let pythonRuntimeManager = null;
 let pythonEnvManager = null;
 let voiceModelLibrary = null;
@@ -298,6 +302,8 @@ async function bootstrap() {
   await settingsStore.init();
   live2dModelLibrary = new Live2DModelLibrary(app);
   await live2dModelLibrary.init();
+  screenshotCaptureService = new ScreenshotCaptureService(app);
+  await screenshotCaptureService.init();
   pythonRuntimeManager = new PythonRuntimeManager(app);
   await pythonRuntimeManager.init();
   pythonEnvManager = new PythonEnvManager(app, {
@@ -319,6 +325,7 @@ async function bootstrap() {
       new OpenClawBackendAdapter(),
       new NanobotBackendAdapter({
         resolveRuntime: () => nanobotRuntimeManager.resolveLaunchConfig(),
+        resolveCapture: (captureId) => screenshotCaptureService?.resolveCapture(captureId) || null,
         emitDebugLog: (payload = {}) => {
           if (!mainWindow || mainWindow.isDestroyed()) {
             return;
@@ -372,6 +379,11 @@ async function bootstrap() {
     ipcMain,
     getWindow: () => mainWindow,
     modelLibrary: live2dModelLibrary,
+  });
+  disposeScreenshotCaptureHandlers = registerScreenshotCaptureIpc({
+    ipcMain,
+    getWindow: () => mainWindow,
+    screenshotCaptureService,
   });
   disposeNanobotRuntimeHandlers = registerNanobotRuntimeIpc({
     ipcMain,
@@ -628,6 +640,9 @@ app.on('before-quit', () => {
   if (disposeNanobotRuntimeHandlers) {
     disposeNanobotRuntimeHandlers();
   }
+  if (disposeScreenshotCaptureHandlers) {
+    disposeScreenshotCaptureHandlers();
+  }
   if (disposeVoiceModelsHandlers) {
     disposeVoiceModelsHandlers();
   }
@@ -642,6 +657,7 @@ app.on('before-quit', () => {
   pythonEnvManager = null;
   voiceModelLibrary = null;
   nanobotRuntimeManager = null;
+  screenshotCaptureService = null;
 
   ipcMain.removeHandler('window:get-platform');
   ipcMain.removeHandler('window:control');

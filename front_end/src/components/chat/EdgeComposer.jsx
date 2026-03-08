@@ -6,6 +6,8 @@ import SendIcon from '@mui/icons-material/Send';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import MicIcon from '@mui/icons-material/Mic';
 import MicOffIcon from '@mui/icons-material/MicOff';
+import ContentCutIcon from '@mui/icons-material/ContentCut';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useI18n } from '../../i18n/I18nContext.jsx';
 import './EdgeComposer.css';
 
@@ -27,6 +29,22 @@ function isEditableTarget(target) {
 }
 
 function normalizeErrorMessage(error, t) {
+  const errorCode = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (errorCode === 'capture_not_supported') {
+    return t('composer.captureUnsupported');
+  }
+  if (errorCode === 'capture_hide_failed') {
+    return t('composer.captureHideFailed');
+  }
+  if (
+    errorCode === 'capture_save_failed'
+    || errorCode === 'capture_data_invalid'
+    || errorCode === 'capture_too_large'
+    || errorCode === 'capture_type_unsupported'
+  ) {
+    return t('composer.captureSaveFailed');
+  }
+
   if (!error) {
     return t('common.sendFailed');
   }
@@ -55,6 +73,9 @@ export default function EdgeComposer({
   onDismissExternalError,
   onExpandedChange,
   placeholder,
+  canCaptureScreen = false,
+  onCaptureScreen,
+  onReleaseCapture,
   voiceEnabled = false,
   voiceToggleDisabled = true,
   onToggleVoice,
@@ -63,13 +84,26 @@ export default function EdgeComposer({
   const rootRef = useRef(null);
   const inputRef = useRef(null);
   const autoHideTimerRef = useRef(null);
+  const captureDraftRef = useRef(null);
 
   const [expanded, setExpanded] = useState(false);
   const [value, setValue] = useState('');
   const [localError, setLocalError] = useState('');
   const [isImeComposing, setIsImeComposing] = useState(false);
+  const [captureDraft, setCaptureDraft] = useState(null);
+  const [isCapturing, setIsCapturing] = useState(false);
 
   const effectiveError = useMemo(() => localError || externalError || '', [externalError, localError]);
+
+  const clearCaptureDraft = useCallback(
+    (capture = captureDraft, { release = true } = {}) => {
+      if (release && capture?.captureId) {
+        void onReleaseCapture?.(capture.captureId);
+      }
+      setCaptureDraft(null);
+    },
+    [captureDraft, onReleaseCapture],
+  );
 
   const clearAutoHideTimer = useCallback(() => {
     if (!autoHideTimerRef.current) {
@@ -100,8 +134,9 @@ export default function EdgeComposer({
     setExpanded(false);
     setLocalError('');
     setValue('');
+    clearCaptureDraft();
     onDismissExternalError?.();
-  }, [clearAutoHideTimer, isStreaming, onDismissExternalError]);
+  }, [clearAutoHideTimer, clearCaptureDraft, isStreaming, onDismissExternalError]);
 
   const submit = useCallback(async () => {
     const content = value.trim();
@@ -114,8 +149,18 @@ export default function EdgeComposer({
     onDismissExternalError?.();
 
     try {
-      await onSubmit?.(content);
+      await onSubmit?.(content, {
+        attachments: captureDraft
+          ? [
+              {
+                kind: 'capture-image',
+                captureId: captureDraft.captureId,
+              },
+            ]
+          : [],
+      });
       setValue('');
+      setCaptureDraft(null);
       clearAutoHideTimer();
       autoHideTimerRef.current = setTimeout(() => {
         setExpanded(false);
@@ -123,7 +168,47 @@ export default function EdgeComposer({
     } catch (error) {
       setLocalError(normalizeErrorMessage(error, t));
     }
-  }, [clearAutoHideTimer, onDismissExternalError, onSubmit, t, value]);
+  }, [captureDraft, clearAutoHideTimer, onDismissExternalError, onSubmit, t, value]);
+
+  const handleCaptureScreen = useCallback(async () => {
+    if (isStreaming || isCapturing || typeof onCaptureScreen !== 'function') {
+      return;
+    }
+
+    clearAutoHideTimer();
+    setExpanded(true);
+    setLocalError('');
+    onDismissExternalError?.();
+    setIsCapturing(true);
+
+    try {
+      const nextCapture = await onCaptureScreen();
+      if (!nextCapture) {
+        return;
+      }
+
+      if (captureDraft?.captureId && captureDraft.captureId !== nextCapture.captureId) {
+        void onReleaseCapture?.(captureDraft.captureId);
+      }
+      setCaptureDraft(nextCapture);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+    } catch (error) {
+      setLocalError(normalizeErrorMessage(error, t));
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [
+    captureDraft?.captureId,
+    clearAutoHideTimer,
+    isCapturing,
+    isStreaming,
+    onCaptureScreen,
+    onDismissExternalError,
+    onReleaseCapture,
+    t,
+  ]);
 
   useEffect(() => {
     if (!expanded) {
@@ -174,10 +259,17 @@ export default function EdgeComposer({
   }, [closeComposer, expanded, openComposer]);
 
   useEffect(() => {
+    captureDraftRef.current = captureDraft;
+  }, [captureDraft]);
+
+  useEffect(() => {
     return () => {
       clearAutoHideTimer();
+      if (captureDraftRef.current?.captureId) {
+        void onReleaseCapture?.(captureDraftRef.current.captureId);
+      }
     };
-  }, [clearAutoHideTimer]);
+  }, [clearAutoHideTimer, onReleaseCapture]);
 
   useEffect(() => {
     onExpandedChange?.(expanded);
@@ -224,8 +316,47 @@ export default function EdgeComposer({
         <EditIcon />
       </IconButton>
 
+      {canCaptureScreen && (
+        <IconButton
+          className={`capture-toggle edge-composer-toggle ${captureDraft ? 'has-capture' : ''}`.trim()}
+          color="primary"
+          onClick={() => {
+            void handleCaptureScreen();
+          }}
+          title={t('composer.captureTitle')}
+          disabled={isStreaming || isCapturing}
+        >
+          <ContentCutIcon />
+        </IconButton>
+      )}
+
       {expanded && (
         <Box className="edge-composer-panel">
+          {captureDraft && (
+            <Box className="edge-composer-capture-preview">
+              <img
+                src={captureDraft.previewUrl}
+                alt={t('composer.capturePreviewAlt')}
+                className="edge-composer-capture-image"
+              />
+              <Box className="edge-composer-capture-meta">
+                <Box className="edge-composer-capture-label">{t('composer.captureAttached')}</Box>
+                <Box className="edge-composer-capture-name">{captureDraft.name}</Box>
+              </Box>
+              <IconButton
+                size="small"
+                className="edge-composer-capture-remove"
+                onClick={() => {
+                  clearCaptureDraft();
+                }}
+                disabled={isStreaming}
+                title={t('composer.captureRemove')}
+              >
+                <DeleteOutlineIcon fontSize="small" />
+              </IconButton>
+            </Box>
+          )}
+
           <TextField
             inputRef={inputRef}
             value={value}
@@ -281,7 +412,7 @@ export default function EdgeComposer({
               onClick={() => {
                 void submit();
               }}
-              disabled={isStreaming}
+              disabled={isStreaming || isCapturing}
             >
               {t('composer.send')}
             </Button>

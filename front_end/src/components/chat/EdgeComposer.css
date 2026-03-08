@@ -43,8 +43,16 @@
   background: rgba(235, 253, 241, 0.92) !important;
 }
 
+.edge-composer .capture-toggle.has-capture {
+  background: rgba(228, 241, 255, 0.96) !important;
+}
+
 :root[data-theme-mode='dark'] .edge-composer .voice-toggle.is-active {
   background: rgba(34, 70, 46, 0.92) !important;
+}
+
+:root[data-theme-mode='dark'] .edge-composer .capture-toggle.has-capture {
+  background: rgba(29, 53, 82, 0.96) !important;
 }
 
 .edge-composer-panel {
@@ -94,6 +102,53 @@
 .edge-composer-panel textarea::placeholder {
   color: var(--composer-input-placeholder);
   opacity: 1;
+}
+
+.edge-composer-capture-preview {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid rgba(121, 164, 225, 0.24);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+:root[data-theme-mode='dark'] .edge-composer-capture-preview {
+  background: rgba(17, 29, 47, 0.74);
+  border-color: rgba(121, 164, 225, 0.28);
+}
+
+.edge-composer-capture-image {
+  width: 88px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(14, 23, 38, 0.18);
+}
+
+.edge-composer-capture-meta {
+  min-width: 0;
+}
+
+.edge-composer-capture-label {
+  font-size: 12px;
+  color: var(--composer-input-placeholder);
+}
+
+.edge-composer-capture-name {
+  margin-top: 2px;
+  color: var(--composer-input-text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.edge-composer-capture-remove {
+  justify-self: end;
 }
 
 .edge-composer-error {

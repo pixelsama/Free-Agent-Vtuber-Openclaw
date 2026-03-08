@@ -3,6 +3,8 @@ import { Box, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import ConfigDrawer from './components/config/ConfigDrawer.jsx';
 import UnifiedDownloadDialog from './components/download/UnifiedDownloadDialog.jsx';
+import ScreenCaptureOverlay from './components/chat/ScreenCaptureOverlay.jsx';
+import { useScreenCaptureController } from './hooks/chat/useScreenCaptureController.js';
 import { useStreamingSubtitleBridge } from './hooks/chat/useStreamingSubtitleBridge.js';
 import { useTextComposerController } from './hooks/chat/useTextComposerController.js';
 import { useConfigPanelController } from './hooks/config/useConfigPanelController.js';
@@ -84,6 +86,13 @@ function AppContent({ desktopMode }) {
   } = useChatBackendSettings({
     t,
     normalizeError,
+  });
+  const {
+    overlayState: captureOverlayState,
+    releaseCapture,
+    startScreenCapture,
+  } = useScreenCaptureController({
+    desktopMode,
   });
 
   useEffect(() => {
@@ -273,11 +282,18 @@ function AppContent({ desktopMode }) {
   const textComposerWithVoiceProps = useMemo(
     () => ({
       ...textComposerProps,
+      canCaptureScreen: desktopMode && chatBackendSettings.chatBackend === 'nanobot',
+      onCaptureScreen: startScreenCapture,
+      onReleaseCapture: releaseCapture,
       voiceEnabled: voiceMicToggle.isEnabled,
       voiceToggleDisabled: !voiceMicToggle.isAvailable || voiceMicToggle.isBusy,
       onToggleVoice: voiceMicToggle.toggleVoice,
     }),
     [
+      chatBackendSettings.chatBackend,
+      desktopMode,
+      releaseCapture,
+      startScreenCapture,
       textComposerProps,
       voiceMicToggle.isAvailable,
       voiceMicToggle.isBusy,
@@ -462,6 +478,15 @@ function AppContent({ desktopMode }) {
         onToggleDetails={() => setDownloadDetailsOpen((prev) => !prev)}
         onClose={closeDownloadDialog}
       />
+      {captureOverlayState && (
+        <ScreenCaptureOverlay
+          imageUrl={captureOverlayState.imageUrl}
+          naturalWidth={captureOverlayState.naturalWidth}
+          naturalHeight={captureOverlayState.naturalHeight}
+          onCancel={captureOverlayState.onCancel}
+          onConfirm={captureOverlayState.onConfirm}
+        />
+      )}
     </Box>
   );
 }

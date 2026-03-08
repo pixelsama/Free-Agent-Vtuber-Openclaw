@@ -82,6 +82,56 @@ test('nanobot backend starts stream through bridge and injects source', async ()
   assert.equal(events[1].payload.source, 'nanobot');
 });
 
+test('nanobot backend resolves capture attachments into media paths', async () => {
+  const calls = [];
+  const backend = new NanobotBackendAdapter({
+    resolveCapture: (captureId) =>
+      captureId === 'capture-1'
+        ? {
+            captureId,
+            filePath: '/tmp/capture-1.png',
+          }
+        : null,
+    bridgeClient: {
+      start: async (payload) => {
+        calls.push(payload);
+        payload.onEvent({
+          type: 'done',
+          payload: {},
+        });
+      },
+      testConnection: async () => ({ ok: true }),
+      dispose: async () => {},
+    },
+  });
+
+  await backend.startStream({
+    settings: {
+      nanobot: {
+        enabled: true,
+        provider: 'openrouter',
+        model: 'anthropic/claude-opus-4-5',
+        apiKey: 'sk-or-test',
+      },
+    },
+    sessionId: 's-capture',
+    content: '看看这张图',
+    options: {
+      attachments: [
+        {
+          kind: 'capture-image',
+          captureId: 'capture-1',
+        },
+      ],
+    },
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].mediaPaths, ['/tmp/capture-1.png']);
+});
+
 test('nanobot backend maps generic errors to nanobot_unreachable', () => {
   const backend = new NanobotBackendAdapter({
     bridgeClient: {

@@ -32,9 +32,12 @@ export function useTextComposerController({
   );
 
   const submitTextComposer = useCallback(
-    async (content) => {
+    async (content, submitOptions = {}) => {
       setComposerExternalError('');
-      await sendUserText(content, { sessionId: 'text-composer' });
+      await sendUserText(content, {
+        sessionId: 'text-composer',
+        payload: submitOptions,
+      });
     },
     [sendUserText],
   );
