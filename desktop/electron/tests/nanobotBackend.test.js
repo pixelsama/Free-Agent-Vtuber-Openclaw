@@ -62,6 +62,7 @@ test('nanobot backend starts stream through bridge and injects source', async ()
       nanobot: {
         enabled: true,
         workspace: '/tmp/nanobot-workspace',
+        allowHighRiskTools: true,
         provider: 'openrouter',
         model: 'anthropic/claude-opus-4-5',
         apiKey: 'sk-or-test',
@@ -76,6 +77,7 @@ test('nanobot backend starts stream through bridge and injects source', async ()
   assert.equal(calls.length, 1);
   assert.equal(calls[0].config.provider, 'openrouter');
   assert.equal(calls[0].config.apiKey, 'sk-or-test');
+  assert.equal(calls[0].config.allowHighRiskTools, true);
   assert.equal(events[0].payload.source, 'nanobot');
   assert.equal(events[1].payload.source, 'nanobot');
 });

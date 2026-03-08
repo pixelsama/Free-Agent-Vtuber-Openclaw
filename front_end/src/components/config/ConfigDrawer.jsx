@@ -332,8 +332,25 @@ export default function ConfigDrawer({
                       label={t('app.nanobotWorkspace')}
                       value={nanobotSettings.workspace || ''}
                       onChange={(event) => onNanobotSettingChange?.('workspace', event.target.value)}
+                      helperText={t('app.nanobotWorkspaceHelper')}
                       fullWidth
                     />
+
+                    <Alert severity={nanobotSettings.allowHighRiskTools ? 'warning' : 'info'}>
+                      {t('app.nanobotPermissionsWarning')}
+                    </Alert>
+
+                    <TextField
+                      select
+                      label={t('app.nanobotAllowHighRiskTools')}
+                      value={nanobotSettings.allowHighRiskTools ? 'true' : 'false'}
+                      onChange={(event) => onNanobotSettingChange?.('allowHighRiskTools', event.target.value === 'true')}
+                      helperText={t('app.nanobotAllowHighRiskToolsHelper')}
+                      fullWidth
+                    >
+                      <MenuItem value="false">{t('common.disabled')}</MenuItem>
+                      <MenuItem value="true">{t('common.enabled')}</MenuItem>
+                    </TextField>
 
                     <TextField
                       label={t('app.nanobotProvider')}

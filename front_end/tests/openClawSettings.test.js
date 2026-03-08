@@ -66,6 +66,7 @@ describe('buildChatBackendSettingsPayload', () => {
       nanobot: {
         enabled: true,
         workspace: '/tmp/nanobot-workspace',
+        allowHighRiskTools: true,
         provider: 'openrouter',
         model: 'anthropic/claude-opus-4-5',
         apiBase: 'https://openrouter.ai/api/v1',
@@ -78,6 +79,7 @@ describe('buildChatBackendSettingsPayload', () => {
 
     expect(payload.chatBackend).toBe('nanobot');
     expect(payload.nanobot.apiKey).toBe('sk-or-v1-demo');
+    expect(payload.nanobot.allowHighRiskTools).toBe(true);
     expect(payload.nanobot.maxTokens).toBe(2048);
   });
 });

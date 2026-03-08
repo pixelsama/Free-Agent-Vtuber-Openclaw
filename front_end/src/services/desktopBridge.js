@@ -88,6 +88,7 @@ function normalizeSettingsResponse(settings = {}) {
     nanobot: {
       enabled: Boolean(nanobot.enabled),
       workspace: typeof nanobot.workspace === 'string' ? nanobot.workspace.trim() : '',
+      allowHighRiskTools: Boolean(nanobot.allowHighRiskTools),
       provider: typeof nanobot.provider === 'string' ? nanobot.provider.trim() : 'openrouter',
       model: typeof nanobot.model === 'string' ? nanobot.model.trim() : 'anthropic/claude-opus-4-5',
       apiBase: typeof nanobot.apiBase === 'string' ? nanobot.apiBase.trim() : '',
@@ -190,6 +191,11 @@ function normalizeSettingsPatch(settings = {}) {
                           typeof settings.nanobot.workspace === 'string'
                             ? settings.nanobot.workspace.trim()
                             : '',
+                      }
+                    : {}),
+                  ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'allowHighRiskTools')
+                    ? {
+                        allowHighRiskTools: Boolean(settings.nanobot.allowHighRiskTools),
                       }
                     : {}),
                   ...(Object.prototype.hasOwnProperty.call(settings.nanobot, 'provider')
@@ -325,6 +331,7 @@ function saveWebSettings(partialSettings = {}) {
         nanobot: {
           enabled: merged.nanobot.enabled,
           workspace: merged.nanobot.workspace,
+          allowHighRiskTools: merged.nanobot.allowHighRiskTools,
           provider: merged.nanobot.provider,
           model: merged.nanobot.model,
           apiBase: merged.nanobot.apiBase,

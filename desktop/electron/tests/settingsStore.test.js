@@ -149,6 +149,7 @@ test('falls back to plain text secrets when secure storage is unavailable', asyn
     nanobot: {
       enabled: true,
       workspace: '/tmp/nanobot-workspace',
+      allowHighRiskTools: true,
       provider: 'openrouter',
       model: 'anthropic/claude-opus-4-5',
       apiKey: 'plain-nanobot-api-key',
@@ -160,11 +161,13 @@ test('falls back to plain text secrets when secure storage is unavailable', asyn
   assert.equal(publicSettings.hasSecureStorage, false);
   assert.equal(publicSettings.hasToken, true);
   assert.equal(publicSettings.nanobot.hasApiKey, true);
+  assert.equal(publicSettings.nanobot.allowHighRiskTools, true);
 
   const fileRaw = await fs.readFile(path.join(tmpDir, 'openclaw-settings.json'), 'utf-8');
   const persisted = JSON.parse(fileRaw);
   assert.equal(persisted.openclaw.token, 'plain-openclaw-token');
   assert.equal(persisted.nanobot.apiKey, 'plain-nanobot-api-key');
+  assert.equal(persisted.nanobot.allowHighRiskTools, true);
 });
 
 test('preserves tokens when save payload omits tokens', async () => {

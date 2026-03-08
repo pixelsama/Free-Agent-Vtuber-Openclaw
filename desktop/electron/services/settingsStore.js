@@ -17,6 +17,7 @@ const DEFAULT_OPENCLAW_SETTINGS = {
 const DEFAULT_NANOBOT_SETTINGS = {
   enabled: false,
   workspace: '',
+  allowHighRiskTools: false,
   provider: 'openrouter',
   model: 'anthropic/claude-opus-4-5',
   apiBase: '',
@@ -77,6 +78,7 @@ function normalizeNanobotSettings(settings = {}) {
   return {
     enabled: Boolean(settings.enabled),
     workspace: normalizeString(settings.workspace, DEFAULT_NANOBOT_SETTINGS.workspace),
+    allowHighRiskTools: Boolean(settings.allowHighRiskTools),
     provider: normalizeString(settings.provider, DEFAULT_NANOBOT_SETTINGS.provider),
     model: normalizeString(settings.model, DEFAULT_NANOBOT_SETTINGS.model),
     apiBase: normalizeString(settings.apiBase, DEFAULT_NANOBOT_SETTINGS.apiBase),
@@ -168,6 +170,9 @@ function normalizePatch(partialSettings = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(nanobotSource, 'workspace')) {
     nanobotPatch.workspace = normalizeString(nanobotSource.workspace);
+  }
+  if (Object.prototype.hasOwnProperty.call(nanobotSource, 'allowHighRiskTools')) {
+    nanobotPatch.allowHighRiskTools = Boolean(nanobotSource.allowHighRiskTools);
   }
   if (Object.prototype.hasOwnProperty.call(nanobotSource, 'provider')) {
     nanobotPatch.provider = normalizeString(nanobotSource.provider);

@@ -64,6 +64,7 @@ def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "workspace": normalize_string(config.get("workspace"), fallback_workspace) or fallback_workspace,
+        "allowHighRiskTools": bool(config.get("allowHighRiskTools")),
         "provider": normalize_string(config.get("provider"), "openrouter") or "openrouter",
         "model": normalize_string(config.get("model"), "anthropic/claude-opus-4-5") or "anthropic/claude-opus-4-5",
         "apiBase": normalize_string(config.get("apiBase"), ""),
@@ -185,9 +186,10 @@ def create_agent(config: dict[str, Any]):
         restrict_to_workspace=True,
     )
 
-    # Reduce risk for desktop integration MVP.
-    for tool_name in ("exec", "spawn", "web_search", "web_fetch", "cron"):
-        agent.tools.unregister(tool_name)
+    if not config["allowHighRiskTools"]:
+        # Keep the default desktop profile file-scoped unless the user explicitly opts in.
+        for tool_name in ("exec", "spawn", "web_search", "web_fetch", "cron"):
+            agent.tools.unregister(tool_name)
 
     return agent
 

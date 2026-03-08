@@ -12,6 +12,7 @@ const defaultChatBackendSettings = {
   nanobot: {
     enabled: false,
     workspace: '',
+    allowHighRiskTools: false,
     provider: 'openrouter',
     model: 'anthropic/claude-opus-4-5',
     apiBase: '',
@@ -46,6 +47,7 @@ function buildComparableSettingsSnapshot(settings = {}) {
     nanobot: {
       enabled: Boolean(normalized.nanobot?.enabled),
       workspace: normalized.nanobot?.workspace || '',
+      allowHighRiskTools: Boolean(normalized.nanobot?.allowHighRiskTools),
       provider: normalized.nanobot?.provider || '',
       model: normalized.nanobot?.model || '',
       apiBase: normalized.nanobot?.apiBase || '',
@@ -102,6 +104,7 @@ export function buildChatBackendSettingsPayload(settings) {
     nanobot: {
       enabled: Boolean(nanobotSource?.enabled),
       workspace: nanobotSource?.workspace || '',
+      allowHighRiskTools: Boolean(nanobotSource?.allowHighRiskTools),
       provider: nanobotSource?.provider || '',
       model: nanobotSource?.model || '',
       apiBase: nanobotSource?.apiBase || '',

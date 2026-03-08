@@ -17,6 +17,7 @@ function normalizeNanobotConfig(settings = {}) {
   return {
     enabled: Boolean(source.enabled),
     workspace: normalizeString(source.workspace, fallbackWorkspace) || fallbackWorkspace,
+    allowHighRiskTools: Boolean(source.allowHighRiskTools),
     provider: normalizeString(source.provider, 'openrouter'),
     model: normalizeString(source.model, 'anthropic/claude-opus-4-5'),
     apiBase: normalizeString(source.apiBase, ''),
