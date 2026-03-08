@@ -81,3 +81,33 @@ test('settings:test returns mapped error when backend test fails', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.error.code, 'openclaw_upstream_error');
 });
+
+test('settings:nanobot:pick-workspace returns selected directory path', async () => {
+  const ipcMain = createIpcMainMock();
+
+  registerSettingsIpc({
+    ipcMain,
+    settingsStore: {
+      getPublic: () => ({
+        nanobot: {
+          workspace: '/tmp/nanobot-workspace',
+        },
+      }),
+    },
+    getWindow: () => ({ id: 1 }),
+    dialogModule: {
+      showOpenDialog: async (_window, options) => {
+        assert.equal(options.defaultPath, '/tmp/nanobot-workspace');
+        assert.deepEqual(options.properties, ['openDirectory', 'createDirectory']);
+        return {
+          canceled: false,
+          filePaths: ['/tmp/selected-workspace'],
+        };
+      },
+    },
+  });
+
+  const result = await ipcMain.invoke('settings:nanobot:pick-workspace');
+  assert.equal(result.ok, true);
+  assert.equal(result.path, '/tmp/selected-workspace');
+});

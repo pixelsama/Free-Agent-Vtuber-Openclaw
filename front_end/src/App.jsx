@@ -75,6 +75,7 @@ function AppContent({ desktopMode }) {
     onChatBackendChange,
     onOpenClawSettingChange,
     onNanobotSettingChange,
+    onPickNanobotWorkspace,
     onTestChatBackendSettings,
     onClearSavedToken,
     nanobotRuntimeStatus,
@@ -443,6 +444,7 @@ function AppContent({ desktopMode }) {
         onChatBackendChange={onChatBackendChange}
         onOpenClawSettingChange={onOpenClawSettingChange}
         onNanobotSettingChange={onNanobotSettingChange}
+        onPickNanobotWorkspace={onPickNanobotWorkspace}
         onTestChatBackendSettings={onTestChatBackendSettings}
         onClearSavedToken={onClearSavedToken}
         nanobotRuntimeStatus={nanobotRuntimeStatus}

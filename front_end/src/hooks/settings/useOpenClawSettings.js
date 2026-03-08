@@ -285,6 +285,36 @@ export function useChatBackendSettings({ t, normalizeError }) {
     setSettingsError('');
   }, []);
 
+  const onPickNanobotWorkspace = useCallback(async () => {
+    setSettingsError('');
+    setSettingsFeedback('');
+
+    try {
+      const result = await desktopBridge.settings.pickNanobotWorkspace();
+      if (!result?.ok || result?.canceled || !result?.path) {
+        return result || { ok: false, canceled: true, path: '' };
+      }
+
+      setChatBackendSettings((prev) => ({
+        ...prev,
+        nanobot: {
+          ...prev.nanobot,
+          workspace: result.path,
+        },
+      }));
+
+      return result;
+    } catch (error) {
+      console.error('Pick Nanobot workspace failed:', error);
+      setSettingsError(formatError(error));
+      return {
+        ok: false,
+        canceled: false,
+        error,
+      };
+    }
+  }, [formatError]);
+
   const onTestChatBackendSettings = useCallback(async () => {
     setSettingsTesting(true);
     setSettingsError('');
@@ -391,6 +421,7 @@ export function useChatBackendSettings({ t, normalizeError }) {
     onChatBackendChange,
     onOpenClawSettingChange,
     onNanobotSettingChange,
+    onPickNanobotWorkspace,
     onTestChatBackendSettings,
     onTestOpenClawSettings: onTestChatBackendSettings,
     onClearSavedToken,

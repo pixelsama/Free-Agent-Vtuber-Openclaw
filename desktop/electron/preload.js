@@ -59,6 +59,9 @@ const settings = {
   testConnection(overrideSettings) {
     return ipcRenderer.invoke('settings:test', overrideSettings);
   },
+  pickNanobotWorkspace() {
+    return ipcRenderer.invoke('settings:nanobot:pick-workspace');
+  },
 };
 
 const nanobotRuntime = {

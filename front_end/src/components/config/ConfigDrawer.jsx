@@ -87,6 +87,7 @@ export default function ConfigDrawer({
   onChatBackendChange,
   onOpenClawSettingChange,
   onNanobotSettingChange,
+  onPickNanobotWorkspace,
   onTestChatBackendSettings,
   onClearSavedToken,
   nanobotRuntimeStatus = {},
@@ -328,13 +329,26 @@ export default function ConfigDrawer({
                       <MenuItem value="false">{t('common.disabled')}</MenuItem>
                     </TextField>
 
-                    <TextField
-                      label={t('app.nanobotWorkspace')}
-                      value={nanobotSettings.workspace || ''}
-                      onChange={(event) => onNanobotSettingChange?.('workspace', event.target.value)}
-                      helperText={t('app.nanobotWorkspaceHelper')}
-                      fullWidth
-                    />
+                    <Stack spacing={1}>
+                      <TextField
+                        label={t('app.nanobotWorkspace')}
+                        value={nanobotSettings.workspace || ''}
+                        helperText={t('app.nanobotWorkspaceHelper')}
+                        InputProps={{
+                          readOnly: true,
+                        }}
+                        fullWidth
+                      />
+                      <Button
+                        variant="outlined"
+                        onClick={() => {
+                          void onPickNanobotWorkspace?.();
+                        }}
+                        disabled={!desktopMode || settingsSaving || settingsTesting}
+                      >
+                        {t('app.nanobotWorkspaceBrowse')}
+                      </Button>
+                    </Stack>
 
                     <Alert severity={nanobotSettings.allowHighRiskTools ? 'warning' : 'info'}>
                       {t('app.nanobotPermissionsWarning')}

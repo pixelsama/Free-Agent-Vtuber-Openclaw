@@ -533,6 +533,17 @@ export const desktopBridge = {
       }
       return testWebConnection(patch);
     },
+    async pickNanobotWorkspace() {
+      const api = getDesktopApi();
+      if (api?.settings?.pickNanobotWorkspace) {
+        return api.settings.pickNanobotWorkspace();
+      }
+      return {
+        ok: false,
+        canceled: true,
+        path: '',
+      };
+    },
   },
   nanobotRuntime: {
     async status() {

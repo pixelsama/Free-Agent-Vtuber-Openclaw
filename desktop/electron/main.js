@@ -333,7 +333,12 @@ async function bootstrap() {
   });
   registerModelProtocol();
 
-  registerSettingsIpc({ ipcMain, settingsStore, backendManager: chatBackendManager });
+  registerSettingsIpc({
+    ipcMain,
+    settingsStore,
+    getWindow: () => mainWindow,
+    backendManager: chatBackendManager,
+  });
 
   windowModeManager = new WindowModeManager();
 
