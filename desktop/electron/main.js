@@ -1,5 +1,15 @@
 const path = require('node:path');
-const { app, BrowserWindow, shell, ipcMain, protocol, screen, globalShortcut } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  shell,
+  ipcMain,
+  protocol,
+  screen,
+  globalShortcut,
+  desktopCapturer,
+  session,
+} = require('electron');
 
 const { registerChatStreamIpc } = require('./ipc/chatStream');
 const { registerConversationIpc } = require('./ipc/conversation');
@@ -19,6 +29,7 @@ const { PythonEnvManager } = require('./services/python/pythonEnvManager');
 const { PythonRuntimeManager } = require('./services/python/pythonRuntimeManager');
 const { SettingsStore } = require('./services/settingsStore');
 const { ScreenshotCaptureService } = require('./services/screenshotCaptureService');
+const { ScreenshotSelectionService } = require('./services/screenshotSelectionService');
 const { VoiceModelLibrary } = require('./services/voice/voiceModelLibrary');
 const { WindowModeManager } = require('./window/windowModeManager');
 const { TrayManager } = require('./window/trayManager');
@@ -53,6 +64,7 @@ let windowModeManager = null;
 let trayManager = null;
 let live2dModelLibrary = null;
 let screenshotCaptureService = null;
+let screenshotSelectionService = null;
 let pythonRuntimeManager = null;
 let pythonEnvManager = null;
 let voiceModelLibrary = null;
@@ -234,6 +246,44 @@ function createWindowOptions() {
   };
 }
 
+function registerDisplayMediaHandler() {
+  const defaultSession = session.defaultSession;
+  if (!defaultSession || typeof defaultSession.setDisplayMediaRequestHandler !== 'function') {
+    return;
+  }
+
+  defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    desktopCapturer
+      .getSources({
+        types: ['screen'],
+        thumbnailSize: {
+          width: 0,
+          height: 0,
+        },
+      })
+      .then((sources) => {
+        const primaryDisplay = screen.getPrimaryDisplay();
+        const selectedSource =
+          sources.find((source) => source.display_id === String(primaryDisplay?.id || ''))
+          || sources[0]
+          || null;
+
+        if (!selectedSource) {
+          callback({});
+          return;
+        }
+
+        callback({
+          video: selectedSource,
+        });
+      })
+      .catch((error) => {
+        console.warn('Failed to resolve desktop capture sources:', error);
+        callback({});
+      });
+  });
+}
+
 function registerModelProtocol() {
   protocol.handle(MODEL_PROTOCOL, async (request) => {
     try {
@@ -304,6 +354,11 @@ async function bootstrap() {
   await live2dModelLibrary.init();
   screenshotCaptureService = new ScreenshotCaptureService(app);
   await screenshotCaptureService.init();
+  screenshotSelectionService = new ScreenshotSelectionService(app, {
+    screenshotCaptureService,
+    getOverlayPreloadPath: () => path.join(__dirname, 'preload.js'),
+    getRendererDevUrl,
+  });
   pythonRuntimeManager = new PythonRuntimeManager(app);
   await pythonRuntimeManager.init();
   pythonEnvManager = new PythonEnvManager(app, {
@@ -339,6 +394,7 @@ async function bootstrap() {
     ],
   });
   registerModelProtocol();
+  registerDisplayMediaHandler();
 
   registerSettingsIpc({
     ipcMain,
@@ -384,6 +440,7 @@ async function bootstrap() {
     ipcMain,
     getWindow: () => mainWindow,
     screenshotCaptureService,
+    screenshotSelectionService,
   });
   disposeNanobotRuntimeHandlers = registerNanobotRuntimeIpc({
     ipcMain,
@@ -658,6 +715,7 @@ app.on('before-quit', () => {
   voiceModelLibrary = null;
   nanobotRuntimeManager = null;
   screenshotCaptureService = null;
+  screenshotSelectionService = null;
 
   ipcMain.removeHandler('window:get-platform');
   ipcMain.removeHandler('window:control');

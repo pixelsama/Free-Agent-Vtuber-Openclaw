@@ -1,3 +1,4 @@
+import live2dCoreUrl from './live2d/core/live2dcubismcore.js?url';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { CssBaseline, ThemeProvider, createTheme } from '@mui/material';
@@ -8,6 +9,31 @@ import {
   useThemeMode,
 } from './theme/ThemeModeContext.jsx';
 import './styles.css';
+
+async function ensureLive2dCoreScript() {
+  if (typeof window === 'undefined' || window.Live2DCubismCore) {
+    return;
+  }
+
+  const existingScript = document.querySelector('script[data-live2d-core="true"]');
+  if (existingScript) {
+    await new Promise((resolve, reject) => {
+      existingScript.addEventListener('load', resolve, { once: true });
+      existingScript.addEventListener('error', reject, { once: true });
+    });
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = live2dCoreUrl;
+    script.async = false;
+    script.dataset.live2dCore = 'true';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Live2D Cubism Core.'));
+    document.head.appendChild(script);
+  });
+}
 
 function ThemedApp() {
   const { resolvedThemeMode } = useThemeMode();
@@ -63,10 +89,16 @@ function ThemedApp() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <ThemeModeProvider>
-      <ThemedApp />
-    </ThemeModeProvider>
-  </React.StrictMode>,
-);
+void ensureLive2dCoreScript()
+  .then(() => {
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      <React.StrictMode>
+        <ThemeModeProvider>
+          <ThemedApp />
+        </ThemeModeProvider>
+      </React.StrictMode>,
+    );
+  })
+  .catch((error) => {
+    console.error(error);
+  });

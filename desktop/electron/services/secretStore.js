@@ -45,6 +45,43 @@ class KeytarSecretStore {
     return token || null;
   }
 
+  async getSecrets(accountNames = []) {
+    const keytar = this.loadKeytar();
+    if (!keytar) {
+      return {};
+    }
+
+    const requestedAccounts = Array.isArray(accountNames)
+      ? accountNames
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter(Boolean)
+      : [];
+
+    if (!requestedAccounts.length) {
+      return {};
+    }
+
+    if (typeof keytar.findCredentials === 'function') {
+      const credentials = await keytar.findCredentials(SERVICE_NAME);
+      const accountSet = new Set(requestedAccounts);
+      return credentials.reduce((result, entry = {}) => {
+        const account = typeof entry.account === 'string' ? entry.account.trim() : '';
+        if (!account || !accountSet.has(account)) {
+          return result;
+        }
+
+        result[account] = entry.password || null;
+        return result;
+      }, {});
+    }
+
+    const result = {};
+    for (const account of requestedAccounts) {
+      result[account] = await keytar.getPassword(SERVICE_NAME, account);
+    }
+    return result;
+  }
+
   async setSecret(accountName, value) {
     const account = typeof accountName === 'string' ? accountName.trim() : '';
     if (!account) {

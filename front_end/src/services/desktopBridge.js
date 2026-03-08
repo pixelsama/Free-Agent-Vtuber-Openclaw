@@ -618,6 +618,36 @@ export const desktopBridge = {
       }
       return api.capture.release(request);
     },
+    selectRegion() {
+      const api = getDesktopApi();
+      if (!api?.capture?.selectRegion) {
+        return Promise.resolve({ ok: false, canceled: false, reason: 'desktop_capture_unavailable' });
+      }
+      return api.capture.selectRegion();
+    },
+  },
+  captureOverlay: {
+    getSession() {
+      const api = getDesktopApi();
+      if (!api?.captureOverlay?.getSession) {
+        return Promise.resolve({ ok: false, reason: 'capture_session_unavailable' });
+      }
+      return api.captureOverlay.getSession();
+    },
+    confirm(request = {}) {
+      const api = getDesktopApi();
+      if (!api?.captureOverlay?.confirm) {
+        return Promise.resolve({ ok: false, reason: 'capture_session_unavailable' });
+      }
+      return api.captureOverlay.confirm(request);
+    },
+    cancel(request = {}) {
+      const api = getDesktopApi();
+      if (!api?.captureOverlay?.cancel) {
+        return Promise.resolve({ ok: false, reason: 'capture_session_unavailable' });
+      }
+      return api.captureOverlay.cancel(request);
+    },
   },
   mode: {
     async getCurrent() {

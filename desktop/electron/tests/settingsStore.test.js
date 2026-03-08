@@ -12,6 +12,7 @@ class FakeSecretStore {
     available = true,
     secrets = {},
     throwOnGet = false,
+    throwOnGetMany = false,
     throwOnSet = false,
     throwOnDelete = false,
   } = {}) {
@@ -20,8 +21,11 @@ class FakeSecretStore {
       ...secrets,
     };
     this.throwOnGet = throwOnGet;
+    this.throwOnGetMany = throwOnGetMany;
     this.throwOnSet = throwOnSet;
     this.throwOnDelete = throwOnDelete;
+    this.getCalls = [];
+    this.getManyCalls = [];
   }
 
   isAvailable() {
@@ -29,10 +33,23 @@ class FakeSecretStore {
   }
 
   async getSecret(accountName) {
+    this.getCalls.push(accountName);
     if (this.throwOnGet) {
       throw new Error('secure_get_failed');
     }
     return this.secrets[accountName] || null;
+  }
+
+  async getSecrets(accountNames = []) {
+    this.getManyCalls.push([...(accountNames || [])]);
+    if (this.throwOnGetMany) {
+      throw new Error('secure_get_many_failed');
+    }
+
+    return (accountNames || []).reduce((result, accountName) => {
+      result[accountName] = this.secrets[accountName] || null;
+      return result;
+    }, {});
   }
 
   async setSecret(accountName, value) {
@@ -133,6 +150,24 @@ test('migrates legacy nanobot api key into secure storage', async () => {
   const fileRaw = await fs.readFile(path.join(tmpDir, 'openclaw-settings.json'), 'utf-8');
   const persisted = JSON.parse(fileRaw);
   assert.equal(Object.prototype.hasOwnProperty.call(persisted.nanobot, 'apiKey'), false);
+});
+
+test('uses batched secure secret reads during init when supported', async () => {
+  const secretStore = new FakeSecretStore({
+    available: true,
+    secrets: {
+      [OPENCLAW_ACCOUNT_NAME]: 'saved-openclaw-token',
+      [NANOBOT_ACCOUNT_NAME]: 'saved-nanobot-api-key',
+    },
+  });
+
+  const { store } = await setupTempStore({ secretStore });
+
+  const mainSettings = store.getForMain();
+  assert.equal(mainSettings.openclaw.token, 'saved-openclaw-token');
+  assert.equal(mainSettings.nanobot.apiKey, 'saved-nanobot-api-key');
+  assert.deepEqual(secretStore.getCalls, []);
+  assert.deepEqual(secretStore.getManyCalls, [[OPENCLAW_ACCOUNT_NAME, NANOBOT_ACCOUNT_NAME]]);
 });
 
 test('falls back to plain text secrets when secure storage is unavailable', async () => {

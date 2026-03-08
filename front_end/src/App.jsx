@@ -3,7 +3,6 @@ import { Box, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import ConfigDrawer from './components/config/ConfigDrawer.jsx';
 import UnifiedDownloadDialog from './components/download/UnifiedDownloadDialog.jsx';
-import ScreenCaptureOverlay from './components/chat/ScreenCaptureOverlay.jsx';
 import { useScreenCaptureController } from './hooks/chat/useScreenCaptureController.js';
 import { useStreamingSubtitleBridge } from './hooks/chat/useStreamingSubtitleBridge.js';
 import { useTextComposerController } from './hooks/chat/useTextComposerController.js';
@@ -88,7 +87,6 @@ function AppContent({ desktopMode }) {
     normalizeError,
   });
   const {
-    overlayState: captureOverlayState,
     releaseCapture,
     startScreenCapture,
   } = useScreenCaptureController({
@@ -478,15 +476,6 @@ function AppContent({ desktopMode }) {
         onToggleDetails={() => setDownloadDetailsOpen((prev) => !prev)}
         onClose={closeDownloadDialog}
       />
-      {captureOverlayState && (
-        <ScreenCaptureOverlay
-          imageUrl={captureOverlayState.imageUrl}
-          naturalWidth={captureOverlayState.naturalWidth}
-          naturalHeight={captureOverlayState.naturalHeight}
-          onCancel={captureOverlayState.onCancel}
-          onConfirm={captureOverlayState.onConfirm}
-        />
-      )}
     </Box>
   );
 }

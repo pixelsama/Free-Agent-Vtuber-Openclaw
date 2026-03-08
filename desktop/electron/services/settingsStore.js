@@ -269,8 +269,11 @@ class SettingsStore {
     this.hasSecureStorage = this.secretStore.isAvailable();
 
     const legacySecrets = extractLegacySecrets(parsed);
-    const secureOpenclawToken = this.hasSecureStorage ? await this.safeGetSecret(OPENCLAW_ACCOUNT_NAME) : '';
-    const secureNanobotApiKey = this.hasSecureStorage ? await this.safeGetSecret(NANOBOT_ACCOUNT_NAME) : '';
+    const secureSecrets = this.hasSecureStorage
+      ? await this.safeGetSecrets([OPENCLAW_ACCOUNT_NAME, NANOBOT_ACCOUNT_NAME])
+      : {};
+    const secureOpenclawToken = secureSecrets[OPENCLAW_ACCOUNT_NAME] || '';
+    const secureNanobotApiKey = secureSecrets[NANOBOT_ACCOUNT_NAME] || '';
 
     this.secrets.openclawToken = secureOpenclawToken || legacySecrets.openclawToken || '';
     this.secrets.nanobotApiKey = secureNanobotApiKey || legacySecrets.nanobotApiKey || '';
@@ -458,6 +461,28 @@ class SettingsStore {
       console.warn('Failed to read token from secure storage, falling back to local file:', error);
       this.hasSecureStorage = false;
       return '';
+    }
+  }
+
+  async safeGetSecrets(accountNames) {
+    try {
+      if (typeof this.secretStore.getSecrets === 'function') {
+        const secrets = await this.secretStore.getSecrets(accountNames);
+        return Object.fromEntries(
+          (Array.isArray(accountNames) ? accountNames : [])
+            .map((accountName) => [accountName, normalizeSecretValue(secrets?.[accountName])]),
+        );
+      }
+
+      const result = {};
+      for (const accountName of Array.isArray(accountNames) ? accountNames : []) {
+        result[accountName] = await this.safeGetSecret(accountName);
+      }
+      return result;
+    } catch (error) {
+      console.warn('Failed to read tokens from secure storage, falling back to local file:', error);
+      this.hasSecureStorage = false;
+      return {};
     }
   }
 

@@ -194,6 +194,21 @@ const capture = {
   release(request) {
     return ipcRenderer.invoke('capture:release', request);
   },
+  selectRegion() {
+    return ipcRenderer.invoke('capture:select-region');
+  },
+};
+
+const captureOverlay = {
+  getSession() {
+    return ipcRenderer.invoke('capture-overlay:get-session');
+  },
+  confirm(request) {
+    return ipcRenderer.invoke('capture-overlay:confirm', request);
+  },
+  cancel(request) {
+    return ipcRenderer.invoke('capture-overlay:cancel', request);
+  },
 };
 
 const voiceModels = {
@@ -231,4 +246,5 @@ contextBridge.exposeInMainWorld('desktop', {
   live2dModels,
   voiceModels,
   capture,
+  captureOverlay,
 });

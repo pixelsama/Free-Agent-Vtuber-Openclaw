@@ -2,9 +2,20 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // Electron packaged builds load the renderer from file:// URLs.
+  // Relative asset paths keep the compiled index.html portable in that mode.
+  base: command === 'build' ? './' : '/',
   plugins: [react()],
   define: { 'process.env': {} },
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        screenshotOverlay: path.resolve(__dirname, 'screenshot-overlay.html'),
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -33,4 +44,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));
