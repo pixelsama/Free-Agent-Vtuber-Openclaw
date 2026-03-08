@@ -75,7 +75,6 @@ function AppContent({ desktopMode }) {
     onChatBackendChange,
     onOpenClawSettingChange,
     onNanobotSettingChange,
-    onVoiceSettingChange,
     onTestChatBackendSettings,
     onClearSavedToken,
     nanobotRuntimeStatus,
@@ -266,7 +265,6 @@ function AppContent({ desktopMode }) {
     desktopMode,
     chatSessionId: 'text-composer',
     onSubmitVoiceText: submitVoiceText,
-    pttHotkey: chatBackendSettings?.voice?.pttHotkey || 'F8',
   });
   const textComposerWithVoiceProps = useMemo(
     () => ({
@@ -442,7 +440,6 @@ function AppContent({ desktopMode }) {
         onChatBackendChange={onChatBackendChange}
         onOpenClawSettingChange={onOpenClawSettingChange}
         onNanobotSettingChange={onNanobotSettingChange}
-        onVoiceSettingChange={onVoiceSettingChange}
         onTestChatBackendSettings={onTestChatBackendSettings}
         onClearSavedToken={onClearSavedToken}
         nanobotRuntimeStatus={nanobotRuntimeStatus}

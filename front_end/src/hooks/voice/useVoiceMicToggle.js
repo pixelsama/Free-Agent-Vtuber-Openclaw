@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { desktopBridge } from '../../services/desktopBridge.js';
 import { useSileroVad } from './useSileroVad.js';
 import { waitForSpeechDrain, waitForSpeechQueueSettled } from './pttSpeechDrain.js';
 import { useVoiceSession } from './useVoiceSession.js';
@@ -86,6 +85,42 @@ function logPtt(message, details = {}) {
   console.info('[voice-ptt]', message, details);
 }
 
+function eventMatchesPttHotkey(event, hotkey) {
+  if (!hotkey) {
+    return false;
+  }
+
+  const eventCode = typeof event?.code === 'string' ? event.code.trim().toUpperCase() : '';
+  const eventKey = typeof event?.key === 'string' ? event.key.trim().toUpperCase() : '';
+
+  if (hotkey === 'SPACE') {
+    return eventCode === 'SPACE' || eventKey === 'SPACE' || event?.key === ' ';
+  }
+
+  return eventCode === hotkey || eventKey === hotkey;
+}
+
+function isFunctionHotkey(hotkey) {
+  return /^F[1-9]$/.test(hotkey) || /^F1[0-2]$/.test(hotkey);
+}
+
+function isEditableTarget(target) {
+  if (!target || typeof target !== 'object') {
+    return false;
+  }
+
+  const tagName = typeof target.tagName === 'string' ? target.tagName.toLowerCase() : '';
+  if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+    return true;
+  }
+
+  if (target.isContentEditable) {
+    return true;
+  }
+
+  return false;
+}
+
 export function useVoiceMicToggle({
   desktopMode = false,
   chatSessionId = 'text-composer',
@@ -107,6 +142,7 @@ export function useVoiceMicToggle({
   const isArmedRef = useRef(false);
   const isPttCapturingRef = useRef(false);
   const isFlushingRef = useRef(false);
+  const hotkeyPressedRef = useRef(false);
   const stopPlaybackRef = useRef(null);
   const stopVadRef = useRef(null);
   const stopSessionRef = useRef(null);
@@ -403,19 +439,13 @@ export function useVoiceMicToggle({
   }, [chatSessionId, onSubmitVoiceText]);
 
   const startPttCapture = useCallback(async () => {
-    if (isPttCapturingRef.current || isFlushingRef.current) {
-      console.warn('[voice-ptt] Ignored PTT start because capture is not ready.', {
+    if (!isArmedRef.current || isPttCapturingRef.current || isFlushingRef.current) {
+      console.warn('[voice-ptt] Ignored PTT start because the voice toggle is not ready.', {
+        isArmed: isArmedRef.current,
         isPttCapturing: isPttCapturingRef.current,
         isFlushing: isFlushingRef.current,
       });
       return { ok: false, reason: 'ptt_not_ready' };
-    }
-
-    if (!isArmedRef.current) {
-      const armed = await enableVoice();
-      if (!armed?.ok) {
-        return armed;
-      }
     }
 
     if (status === 'transcribing') {
@@ -455,7 +485,7 @@ export function useVoiceMicToggle({
       sessionId,
     });
     return { ok: true };
-  }, [enableVoice, handleSpeechEnd, normalizedHotkey, sessionId, startVad, status]);
+  }, [handleSpeechEnd, normalizedHotkey, sessionId, startVad, status]);
 
   const stopPttCaptureAndSubmit = useCallback(async () => {
     if (!isPttCapturingRef.current || isFlushingRef.current) {
@@ -540,6 +570,7 @@ export function useVoiceMicToggle({
         sessionId,
       });
       runEpochRef.current += 1;
+      hotkeyPressedRef.current = false;
       isPttCapturingRef.current = false;
       isFlushingRef.current = false;
       isArmedRef.current = false;
@@ -656,36 +687,80 @@ export function useVoiceMicToggle({
   useEffect(() => onEvent(handleVoiceEvent), [handleVoiceEvent, onEvent]);
 
   useEffect(() => {
-    if (!desktopMode) {
+    if (!desktopMode || !isArmed || !normalizedHotkey) {
       return () => {};
     }
 
-    return desktopBridge.voice.onPttCommand((event = {}) => {
-      if (event.hotkey && event.hotkey !== normalizedHotkey) {
+    const shouldSkipEditable = !isFunctionHotkey(normalizedHotkey);
+
+    const onKeyDown = (event) => {
+      if (!eventMatchesPttHotkey(event, normalizedHotkey)) {
         return;
       }
 
-      if (event.action === 'start') {
-        logPtt('Received global PTT start command.', {
-          hotkey: normalizedHotkey,
-        });
-        void startPttCapture();
+      if (event.repeat || hotkeyPressedRef.current) {
         return;
       }
 
-      if (event.action === 'stop') {
-        logPtt('Received global PTT stop command.', {
-          hotkey: normalizedHotkey,
-        });
-        void stopPttCaptureAndSubmit();
+      if (shouldSkipEditable && isEditableTarget(event.target)) {
+        return;
       }
-    });
-  }, [desktopMode, normalizedHotkey, startPttCapture, stopPttCaptureAndSubmit]);
+
+      hotkeyPressedRef.current = true;
+      event.preventDefault();
+      logPtt('Detected PTT hotkey down.', {
+        hotkey: normalizedHotkey,
+        code: event.code,
+        key: event.key,
+      });
+      void startPttCapture();
+    };
+
+    const onKeyUp = (event) => {
+      if (!eventMatchesPttHotkey(event, normalizedHotkey)) {
+        return;
+      }
+
+      if (!hotkeyPressedRef.current) {
+        return;
+      }
+
+      hotkeyPressedRef.current = false;
+      event.preventDefault();
+      logPtt('Detected PTT hotkey up.', {
+        hotkey: normalizedHotkey,
+        code: event.code,
+        key: event.key,
+      });
+      void stopPttCaptureAndSubmit();
+    };
+
+    const onBlur = () => {
+      if (!hotkeyPressedRef.current) {
+        return;
+      }
+      hotkeyPressedRef.current = false;
+      logPtt('Window blur forced a PTT stop.', {
+        hotkey: normalizedHotkey,
+      });
+      void stopPttCaptureAndSubmit();
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [desktopMode, isArmed, normalizedHotkey, startPttCapture, stopPttCaptureAndSubmit]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      hotkeyPressedRef.current = false;
       isArmedRef.current = false;
       isPttCapturingRef.current = false;
       isFlushingRef.current = false;

@@ -164,12 +164,6 @@ const voice = {
   onFlowControl(handler) {
     return onChannel('voice:flow-control', handler);
   },
-  onPttCommand(handler) {
-    return onChannel('voice:ptt-command', handler);
-  },
-  onPttStatus(handler) {
-    return onChannel('voice:ptt-status', handler);
-  },
 };
 
 const live2dModels = {

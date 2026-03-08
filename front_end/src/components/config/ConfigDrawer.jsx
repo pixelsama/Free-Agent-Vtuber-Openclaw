@@ -87,7 +87,6 @@ export default function ConfigDrawer({
   onChatBackendChange,
   onOpenClawSettingChange,
   onNanobotSettingChange,
-  onVoiceSettingChange,
   onTestChatBackendSettings,
   onClearSavedToken,
   nanobotRuntimeStatus = {},
@@ -447,8 +446,6 @@ export default function ConfigDrawer({
             {activeConfigTab === 2 && (
               <VoiceSettingsPanel
                 desktopMode={desktopMode}
-                voiceSettings={chatBackendSettings?.voice}
-                onVoiceSettingChange={onVoiceSettingChange}
                 onOpenDownloadCenter={onOpenDownloadCenter}
                 onBuiltinTtsEnabledChange={onBuiltinTtsEnabledChange}
               />

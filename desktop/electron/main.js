@@ -18,7 +18,6 @@ const { PythonEnvManager } = require('./services/python/pythonEnvManager');
 const { PythonRuntimeManager } = require('./services/python/pythonRuntimeManager');
 const { SettingsStore } = require('./services/settingsStore');
 const { VoiceModelLibrary } = require('./services/voice/voiceModelLibrary');
-const { GlobalPttManager } = require('./services/voice/globalPttManager');
 const { WindowModeManager } = require('./window/windowModeManager');
 const { TrayManager } = require('./window/trayManager');
 const { registerModeIpc } = require('./window/modeIpc');
@@ -54,7 +53,6 @@ let pythonRuntimeManager = null;
 let pythonEnvManager = null;
 let voiceModelLibrary = null;
 let nanobotRuntimeManager = null;
-let globalPttManager = null;
 let isQuitting = false;
 let chatBackendManager = null;
 const legacyConversationMirrorEnabled = (() => {
@@ -190,7 +188,6 @@ function registerModelProtocol() {
 async function createMainWindow() {
   mainWindow = new BrowserWindow(createWindowOptions());
   windowModeManager.attachWindow(mainWindow);
-  globalPttManager?.emitCurrentStatus();
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) {
@@ -237,22 +234,6 @@ async function createMainWindow() {
 async function bootstrap() {
   settingsStore = new SettingsStore(app);
   await settingsStore.init();
-  globalPttManager = new GlobalPttManager({
-    emitCommand: (payload) => {
-      if (!mainWindow || mainWindow.isDestroyed()) {
-        return;
-      }
-      mainWindow.webContents.send('voice:ptt-command', payload);
-    },
-    emitStatus: (payload) => {
-      if (!mainWindow || mainWindow.isDestroyed()) {
-        return;
-      }
-      mainWindow.webContents.send('voice:ptt-status', payload);
-    },
-  });
-  globalPttManager.updateSettings(settingsStore.getPublic());
-  globalPttManager.start();
   live2dModelLibrary = new Live2DModelLibrary(app);
   await live2dModelLibrary.init();
   pythonRuntimeManager = new PythonRuntimeManager(app);
@@ -290,14 +271,7 @@ async function bootstrap() {
   });
   registerModelProtocol();
 
-  registerSettingsIpc({
-    ipcMain,
-    settingsStore,
-    backendManager: chatBackendManager,
-    onSaved: async (saved) => {
-      globalPttManager?.updateSettings(saved);
-    },
-  });
+  registerSettingsIpc({ ipcMain, settingsStore, backendManager: chatBackendManager });
 
   windowModeManager = new WindowModeManager();
 
@@ -595,8 +569,6 @@ app.on('before-quit', () => {
     void chatBackendManager.dispose();
     chatBackendManager = null;
   }
-  globalPttManager?.stop();
-  globalPttManager = null;
   pythonRuntimeManager = null;
   pythonEnvManager = null;
   voiceModelLibrary = null;
