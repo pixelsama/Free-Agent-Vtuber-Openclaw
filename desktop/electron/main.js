@@ -63,10 +63,20 @@ const legacyConversationMirrorEnabled = (() => {
   const normalized = value.trim().toLowerCase();
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 })();
+
+function getDefaultVoiceToggleAccelerator() {
+  if (process.platform === 'darwin') {
+    // Space-based shortcuts are commonly intercepted by macOS and IMEs.
+    return 'F8';
+  }
+
+  return 'CommandOrControl+Shift+Space';
+}
+
 const DEFAULT_GLOBAL_VOICE_TOGGLE_ACCELERATOR =
   typeof process.env.OPENCLAW_VOICE_TOGGLE_ACCELERATOR === 'string'
-    ? process.env.OPENCLAW_VOICE_TOGGLE_ACCELERATOR.trim() || 'CommandOrControl+Shift+Space'
-    : 'CommandOrControl+Shift+Space';
+    ? process.env.OPENCLAW_VOICE_TOGGLE_ACCELERATOR.trim() || getDefaultVoiceToggleAccelerator()
+    : getDefaultVoiceToggleAccelerator();
 let registeredVoiceToggleAccelerator = '';
 
 function emitVoiceToggleRequest(payload = {}) {
@@ -102,6 +112,9 @@ function registerGlobalVoiceToggleShortcut() {
   }
 
   registeredVoiceToggleAccelerator = DEFAULT_GLOBAL_VOICE_TOGGLE_ACCELERATOR;
+  console.info('Registered global voice toggle shortcut.', {
+    accelerator: registeredVoiceToggleAccelerator,
+  });
 }
 
 function unregisterGlobalVoiceToggleShortcut() {

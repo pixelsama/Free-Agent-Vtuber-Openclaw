@@ -8,8 +8,16 @@ import { desktopBridge } from '../../services/desktopBridge.js';
 const DEFAULT_FRAME_SAMPLES = 320;
 const DEFAULT_AUTO_SUBMIT_DELAY_MS = 1500;
 const DEFAULT_INTERRUPT_CONFIRM_MS = 200;
+function getDefaultVoiceToggleHotkey() {
+  if (typeof navigator === 'object' && /mac/i.test(navigator.platform || '')) {
+    return 'F8';
+  }
+
+  return 'CommandOrControl+Shift+Space';
+}
+
 const RAW_VOICE_TOGGLE_HOTKEY =
-  import.meta.env.VITE_VOICE_TOGGLE_ACCELERATOR || 'CommandOrControl+Shift+Space';
+  import.meta.env.VITE_VOICE_TOGGLE_ACCELERATOR || getDefaultVoiceToggleHotkey();
 const RAW_AUTO_SUBMIT_DELAY_MS = import.meta.env.VITE_VOICE_AUTO_SUBMIT_DELAY_MS;
 const RAW_INTERRUPT_CONFIRM_MS = import.meta.env.VITE_VOICE_INTERRUPT_CONFIRM_MS;
 
@@ -49,7 +57,7 @@ function splitFloat32ToPcmChunks(audioFloat32, frameSamples = DEFAULT_FRAME_SAMP
 function normalizeHotkeyLabel(value) {
   const raw = typeof value === 'string' ? value.trim() : '';
   if (!raw) {
-    return 'CommandOrControl+Shift+Space';
+    return getDefaultVoiceToggleHotkey();
   }
 
   return raw;
@@ -79,6 +87,20 @@ function previewText(value, limit = 80) {
   }
 
   return `${normalized.slice(0, limit)}...`;
+}
+
+export async function stopVoiceCaptureAndSubmit({
+  reason = 'manual',
+  stopVad = async () => ({ ok: true }),
+  flushPendingSpeechAndSubmit = async () => ({ ok: true }),
+  invalidateEpoch = () => {},
+} = {}) {
+  try {
+    await stopVad();
+    return await flushPendingSpeechAndSubmit({ reason });
+  } finally {
+    invalidateEpoch();
+  }
 }
 
 function logVoice(message, details = {}) {
@@ -621,14 +643,19 @@ export function useVoiceMicToggle({
         reason,
         sessionId,
       });
-      runEpochRef.current += 1;
       isEnabledRef.current = false;
       setIsEnabled(false);
       setLocalError('');
 
       try {
-        await stopVad();
-        const submitResult = await flushPendingSpeechAndSubmit({ reason });
+        const submitResult = await stopVoiceCaptureAndSubmit({
+          reason,
+          stopVad,
+          flushPendingSpeechAndSubmit,
+          invalidateEpoch: () => {
+            runEpochRef.current += 1;
+          },
+        });
         if (!submitResult?.ok && submitResult?.reason !== 'empty_text') {
           setLocalError(submitResult.reason || 'voice_submit_failed');
         }
