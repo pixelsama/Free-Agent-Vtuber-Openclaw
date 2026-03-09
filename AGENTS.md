@@ -2,11 +2,23 @@
 
 ## Project Structure & Modules
 - `desktop/electron/` — Electron main/preload, IPC handlers, tray/window mode, chat/voice adapters.
-  - `main.js` — app bootstrap, BrowserWindow security config, IPC registration, voice/chat bridge hookup.
-  - `ipc/chatStream.js` — OpenClaw stream IPC (`chat:stream:start`, `chat:stream:abort`).
+  - `main.js` — app bootstrap, BrowserWindow security config, backend/runtime wiring, IPC registration.
+  - `preload.js` — expose minimal renderer bridge (`conversation`, `settings`, `voice`, `voiceModels`, `live2dModels`, `nanobotRuntime`, `capture`, `windowMode`).
+  - `ipc/chatStream.js` — low-level stream IPC (`chat:stream:start`, `chat:stream:abort`) and segment emission.
+  - `ipc/conversation.js` — conversation control IPC (`conversation:submit-user-text`, `conversation:abort-active`).
+  - `ipc/settings.js` — settings read/save/test + Nanobot workspace picker (`settings:*`).
+  - `ipc/nanobotRuntime.js` — Nanobot runtime install/status IPC (`nanobot-runtime:*`).
+  - `ipc/screenshotCapture.js` — screenshot capture/overlay lifecycle IPC (`capture:*`, `capture-overlay:*`).
   - `ipc/voiceSession.js` — voice session lifecycle/audio commit/TTS flow-control IPC (`voice:*`).
   - `ipc/voiceModels.js` — voice model library IPC (`voice-models:*`).
+  - `ipc/live2dModels.js` — Live2D model library IPC (`live2d-models:list`, `live2d-models:import-zip`).
+  - `window/modeIpc.js`, `window/windowModeManager.js`, `window/trayManager.js` — pet/window mode handshake and tray-driven mode control.
+  - `services/chat/conversationRuntime.js` — per-session turn orchestration (`latest-wins`/`queue`) and chat/voice event envelope routing.
+  - `services/chat/backendManager.js` — backend selection (`openclaw` / `nanobot`) and shared error mapping.
+  - `services/chat/backends/openclawBackend.js`, `services/chat/backends/nanobotBackend.js` — backend adapters.
+  - `services/chat/nanobot/nanobotRuntimeManager.js` — Nanobot repo install/launch config, resolved against shared Python runtime/env.
   - `services/live2dModelLibrary.js` — Live2D ZIP import, model discovery, and custom protocol path resolution.
+  - `services/screenshotCaptureService.js`, `services/screenshotSelectionService.js` — capture lifecycle + overlay selection session management.
   - `services/python/pythonRuntimeManager.js` — shared app-level Python runtime download/install/verification.
   - `services/python/pythonEnvManager.js` — isolated Python env creation and dependency installation by profile/lock.
   - `services/python/pythonRuntimeCatalog.js` — built-in shared Python runtime package catalog (default Python `3.12`).
@@ -16,10 +28,13 @@
   - `services/voice/asrWorkerClient.js`, `asrWorkerProcess.js` — ASR worker process isolation (Python path).
   - `services/voice/ttsWorkerClient.js`, `ttsWorkerProcess.js` — TTS worker process and chunk ACK backpressure.
   - `services/voice/providers/python/` — Python bridge/bootstrap/resident worker scripts (`tts_resident_worker.py` provides Qwen3 MLX streaming TTS).
-  - `services/chat/nanobot/nanobotRuntimeManager.js` — Nanobot repo install/launch config, now resolved against shared Python runtime/env instead of voice bundles.
-  - `ipc/live2dModels.js` — model library IPC (`live2d-models:list`, `live2d-models:import-zip`).
 - `front_end/` — React + Vite renderer (`src/`, `tests/`, `package.json`).
+  - `src/App.jsx` — app composition root (chat, subtitles, voice, settings, download center).
+  - `src/shells/MainShell.jsx`, `src/shells/PetShell.jsx` — window/pet mode shells.
+  - `src/components/config/ConfigDrawer.jsx` — chat backend, Nanobot runtime, voice, and preferences panels.
   - `src/components/config/VoiceSettingsPanel.jsx` — voice session controls + model catalog install/select UI.
+  - `src/services/desktopBridge.js` — normalized desktop/web bridge and `conversation:event` routing helpers.
+  - `src/hooks/chat/useStreamingSubtitleBridge.js` — subtitle sync from chat envelope and playback lifecycle.
   - `src/hooks/voice/` — VAD, capture, session bridge, and TTS playback handling.
 - `docs/` — current plans and architecture notes (historical docs are in `docs/archive/`).
 - Root `package.json` — desktop scripts and packaging (`electron-builder`).
@@ -29,12 +44,31 @@
   - Root workspace: `pnpm install`
 - Desktop dev:
   - `pnpm run desktop:dev`
+- Split desktop dev (when debugging startup race conditions):
+  - `pnpm run desktop:dev:renderer`
+  - `pnpm run desktop:dev:electron`
 - Build desktop package:
   - `pnpm run desktop:build`
 - Tests:
   - Desktop main-process tests: `pnpm run test:desktop`
   - Frontend tests: `pnpm run test:frontend`
   - Frontend lint: `cd front_end && pnpm run lint`
+
+## Chat & Conversation Runtime Notes (Current State)
+- Supported chat backends:
+  - `openclaw` (default)
+  - `nanobot`
+- Settings shape is next-gen:
+  - `chatBackend`
+  - `openclaw` (`baseUrl`, `agentId`, token in secure storage)
+  - `nanobot` (`enabled`, `workspace`, provider/model/API fields, API key in secure storage)
+- Conversation runtime (`conversationRuntime`) owns per-session concurrency:
+  - default policy: `latest-wins`
+  - optional policy: `queue`
+- Renderer integration should prefer:
+  - request APIs: `conversation:submit-user-text`, `conversation:abort-active`
+  - event channel: `conversation:event` envelope with `channel: chat|voice`
+- Legacy mirrors (`chat:stream:event`, `voice:event`) are compatibility-only and gated by `OPENCLAW_ENABLE_LEGACY_STREAM_EVENTS`.
 
 ## Voice Runtime Notes (Current State)
 - Providers currently supported in main process:
@@ -62,9 +96,9 @@
   - `3.12.12`
 - Runtime env is resolved by `VoiceModelLibrary#getRuntimeEnv(...)` and injected into voice session via `registerVoiceSessionIpc({ resolveVoiceEnv })`.
 - Nanobot runtime is resolved independently by `NanobotRuntimeManager#resolveLaunchConfig()` and should not depend on selected voice bundles.
-- Keep event contracts stable for renderer integration:
-  - `voice:event` (`state`, `asr-partial`, `asr-final`, `tts-chunk`, `done`, `error`)
-  - `voice:flow-control` (`pause` / `resume`)
+- Keep renderer contracts stable:
+  - conversation envelope: `conversation:event` with `channel: voice` and event types including `state`, `asr-partial`, `asr-final`, `tts-chunk`, `done`, `error`, segment lifecycle payloads.
+  - flow control: `voice:flow-control` with payload `{ type: 'tts-flow-control', action: 'pause'|'resume', ... }`.
 
 ## Coding Style & Naming
 - JavaScript/React: prefer clear module boundaries and descriptive names.
@@ -72,11 +106,9 @@
 - Keep preload API minimal and explicit.
 
 ## UI Framework Policy
-- Current direction: **progressive de-MUI migration**. Treat MUI as legacy dependency in this project.
-- Do **not** introduce new MUI components for new UI work unless explicitly required by the user.
-- For new UI, prefer local reusable primitives/components with project-owned styles (CSS/CSS variables), optimized for desktop widget/pet-mode visuals.
-- When touching existing MUI-heavy areas, migrate incrementally by replacing highest-friction components first (for example: `TextField`, `Button`, `Tabs`, `Drawer`).
-- Do not do one-shot full rewrites. Keep behavior parity and reduce regression risk through staged replacement.
+- Current UI is still MUI-heavy (for example `ConfigDrawer`, settings forms, tabs, drawers).
+- Prefer incremental migration over one-shot rewrites: preserve behavior parity while replacing high-friction components.
+- For newly introduced UI surfaces, prefer project-owned reusable primitives/styles when practical.
 - Preserve UX/security constraints during migration: pet-mode interaction affordance, streaming composer behavior, and Electron security boundaries.
 
 ## Testing Guidelines
@@ -84,17 +116,22 @@
   - Desktop: Node built-in `node:test`
   - Frontend: `vitest`
 - Focus regression tests on:
-  - IPC stream event mapping (`text-delta/done/error`)
+  - conversation runtime policy behavior (`latest-wins`/`queue`) and envelope routing
+  - IPC stream event mapping (`text-delta` / `segment-ready` / `done` / `error`)
   - stream abort behavior
   - voice session state transitions and commit serialization
   - TTS chunk ACK backpressure pause/resume and timeout handling
+  - segment subtitle/playback lifecycle synchronization (ready/start/finish/fail/reset)
   - shared Python runtime/env resolution and legacy path migration
   - ASR worker warmup/fallback behavior
   - voice-to-chat bridge on `asr-final`
-  - settings persistence and token handling
+  - settings persistence and secure secret handling (OpenClaw token / Nanobot API key)
+  - backend switching and Nanobot connection validation behavior
   - SSE parsing robustness
   - voice model catalog install + runtime/env mapping (sherpa/python)
   - nanobot runtime install + shared Python env resolution
+  - screenshot capture + overlay selection lifecycle (`capture:*`, `capture-overlay:*`)
+  - pet/window mode handshake and mouse passthrough updates
   - Live2D custom protocol URL resolution compatibility:
     - `openclaw-model:///folder/file`
     - `openclaw-model://folder/file`
@@ -112,8 +149,8 @@
   - Tests run and results
 
 ## Security & Config
-- OpenClaw token should be managed in Electron main process and stored via system keychain when available.
-- Do not expose token to renderer over preload APIs.
+- OpenClaw token and Nanobot API key should be managed in Electron main process and stored via system keychain when available.
+- Do not expose raw secrets to renderer over preload APIs.
 - Keep `contextIsolation: true` and `sandbox: true` for BrowserWindow.
 - For `openclaw-model://` asset serving, keep strict root-directory confinement and reject traversal attempts.
 - Do not let renderer directly execute Python, shell, or model bootstrap commands; keep these operations in trusted main-process services.
