@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import ConfigDrawer from './components/config/ConfigDrawer.jsx';
+import ChatSidebar from './components/chat/ChatSidebar.jsx';
 import UnifiedDownloadDialog from './components/download/UnifiedDownloadDialog.jsx';
 import { useScreenCaptureController } from './hooks/chat/useScreenCaptureController.js';
 import { useStreamingSubtitleBridge } from './hooks/chat/useStreamingSubtitleBridge.js';
 import { useTextComposerController } from './hooks/chat/useTextComposerController.js';
+import { useChatHistory } from './hooks/chat/useChatHistory.js';
 import { useConfigPanelController } from './hooks/config/useConfigPanelController.js';
 import { useUnifiedDownloader } from './hooks/download/useUnifiedDownloader.js';
 import { useStreamingChat } from './hooks/useStreamingChat.js';
@@ -42,8 +44,12 @@ function AppContent({ desktopMode }) {
   const [builtinTtsEnabled, setBuiltinTtsEnabled] = useState(false);
   const platform = usePlatformInfo({ desktopMode });
 
+  // Chat history — persists to localStorage
+  const chatHistory = useChatHistory();
+  const activeAiMsgIdRef = useRef(null);
+
   const { subtitleText, appendDelta, setSegmentText, finishStream, clearSubtitle, beginStream } = useSubtitleFeed();
-  const { startStreaming, cancelStreaming, onDelta, onSegmentReady, onDone, onError, isStreaming } =
+  const { startStreaming: _startStreaming, cancelStreaming, onDelta, onSegmentReady, onDone, onError, isStreaming } =
     useStreamingChat();
   const onConversationEvent = useCallback(
     (handler) => {
@@ -54,6 +60,51 @@ function AppContent({ desktopMode }) {
     },
     [desktopMode],
   );
+
+  // Wrapped startStreaming that also tracks chat history
+  const startStreaming = useCallback(
+    async (sessionId, content, extras) => {
+      const text = typeof content === 'string' ? content.trim() : '';
+      if (text) {
+        const attachments =
+          Array.isArray(extras?.attachments) ? extras.attachments : [];
+        chatHistory.addUserMessage(text, attachments);
+        activeAiMsgIdRef.current = chatHistory.startAiMessage();
+      }
+      return _startStreaming(sessionId, content, extras);
+    },
+    [_startStreaming, chatHistory],
+  );
+
+  // Track AI streaming response into chat history
+  useEffect(() => {
+    const handleDelta = (delta) => {
+      if (activeAiMsgIdRef.current) {
+        chatHistory.appendAiDelta(activeAiMsgIdRef.current, delta);
+      }
+    };
+    const handleDone = () => {
+      if (activeAiMsgIdRef.current) {
+        chatHistory.finalizeAiMessage(activeAiMsgIdRef.current);
+        activeAiMsgIdRef.current = null;
+      }
+    };
+    const handleError = () => {
+      if (activeAiMsgIdRef.current) {
+        chatHistory.cancelAiMessage(activeAiMsgIdRef.current);
+        activeAiMsgIdRef.current = null;
+      }
+    };
+
+    const detachDelta = onDelta(handleDelta);
+    const detachDone = onDone(handleDone);
+    const detachError = onError(handleError);
+    return () => {
+      detachDelta();
+      detachDone();
+      detachError();
+    };
+  }, [chatHistory, onDelta, onDone, onError]);
 
   const normalizeError = useCallback((error) => normalizeErrorMessage(error, t), [t]);
   const {
@@ -229,10 +280,53 @@ function AppContent({ desktopMode }) {
     await onInstallNanobotRuntime();
   }, [ensureDownloadTask, onInstallNanobotRuntime, openDownloadTask, t]);
 
-  const { showConfigPanel, openConfigPanel, closeConfigPanel } = useConfigPanelController({
+  const { showConfigPanel, openConfigPanel: _openConfigPanel, closeConfigPanel } = useConfigPanelController({
     isPetMode,
     live2dViewerRef,
   });
+
+  // Chat panel state — mutually exclusive with settings panel
+  const [showChatPanel, setShowChatPanel] = useState(false);
+  const closeChatSyncTimeoutRef = useRef(null);
+
+  const openChatPanel = useCallback(() => {
+    _openConfigPanel && closeConfigPanel();
+    setShowChatPanel(true);
+  }, [closeConfigPanel, _openConfigPanel]);
+
+  const closeChatPanel = useCallback(() => {
+    setShowChatPanel(false);
+    // Give drawer slide-out animation time to finish, then sync canvas
+    if (closeChatSyncTimeoutRef.current) {
+      window.clearTimeout(closeChatSyncTimeoutRef.current);
+    }
+    closeChatSyncTimeoutRef.current = window.setTimeout(() => {
+      closeChatSyncTimeoutRef.current = null;
+      live2dViewerRef.current?.syncCanvasSize?.();
+    }, 260);
+  }, [live2dViewerRef]);
+
+  // When settings opens, close chat panel (and vice versa is handled in openChatPanel)
+  const openConfigPanel = useCallback(() => {
+    setShowChatPanel(false);
+    _openConfigPanel();
+  }, [_openConfigPanel]);
+
+  useEffect(
+    () => () => {
+      if (closeChatSyncTimeoutRef.current) {
+        window.clearTimeout(closeChatSyncTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
+  // Close chat panel in pet mode (like config panel)
+  useEffect(() => {
+    if (isPetMode) {
+      setShowChatPanel(false);
+    }
+  }, [isPetMode]);
 
   const { setComposerExternalError, textComposerProps } = useTextComposerController({
     beginStream,
@@ -378,14 +472,17 @@ function AppContent({ desktopMode }) {
       height: '100dvh',
       minHeight: '100dvh',
       transition: 'padding-right 220ms ease',
-      paddingRight: showConfigPanel && !isPetMode && !isNarrowViewport ? `${CONFIG_DRAWER_WIDTH}px` : 0,
+      paddingRight:
+        (showConfigPanel || showChatPanel) && !isPetMode && !isNarrowViewport
+          ? `${CONFIG_DRAWER_WIDTH}px`
+          : 0,
       background: isPetMode
         ? 'transparent'
         : muiTheme.palette.mode === 'dark'
           ? 'radial-gradient(circle at top, rgba(39, 57, 92, 0.45), rgba(12, 16, 24, 0.15)), linear-gradient(180deg, #131c2d 0%, #0b111c 100%)'
           : 'radial-gradient(circle at top, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.06)), linear-gradient(180deg, #e5eeff 0%, #f9fbff 100%)',
     }),
-    [isNarrowViewport, isPetMode, muiTheme.palette.mode, showConfigPanel],
+    [isNarrowViewport, isPetMode, muiTheme.palette.mode, showConfigPanel, showChatPanel],
   );
 
   const handleControlModelChange = useCallback((modelPath) => {
@@ -420,6 +517,9 @@ function AppContent({ desktopMode }) {
           bindPetHover={bindPetHover}
           setPetHover={setPetHover}
           textComposerProps={textComposerWithVoiceProps}
+          showChatPanel={showChatPanel}
+          onOpenChatPanel={openChatPanel}
+          onCloseChatPanel={closeChatPanel}
         />
       ) : (
         <MainShell
@@ -436,6 +536,8 @@ function AppContent({ desktopMode }) {
           onSwitchToPetMode={() => setDesktopWindowMode(MODE_PET)}
           onWindowControl={controlWindow}
           textComposerProps={textComposerWithVoiceProps}
+          showChatPanel={showChatPanel}
+          onOpenChatPanel={openChatPanel}
         />
       )}
 
@@ -468,6 +570,16 @@ function AppContent({ desktopMode }) {
         onClearNanobotDebugLogs={clearNanobotDebugLogs}
         onOpenDownloadCenter={openDownloadTask}
         onBuiltinTtsEnabledChange={syncBuiltinTtsEnabled}
+      />
+      <ChatSidebar
+        open={showChatPanel}
+        onClose={closeChatPanel}
+        isPetMode={isPetMode}
+        isNarrowViewport={isNarrowViewport}
+        messages={chatHistory.messages}
+        onClearHistory={chatHistory.clearHistory}
+        isStreaming={isStreaming}
+        {...textComposerWithVoiceProps}
       />
       <UnifiedDownloadDialog
         open={downloadDialogOpen}

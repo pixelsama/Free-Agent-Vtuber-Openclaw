@@ -3,10 +3,10 @@ import { Box, IconButton } from '@mui/material';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import LockIcon from '@mui/icons-material/Lock';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
+import ChatIcon from '@mui/icons-material/Chat';
 import Live2DViewer from '../components/live2d/Live2DViewer.jsx';
 import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import { usePetDraggable } from '../hooks/pet/usePetDraggable.js';
-import EdgeComposer from '../components/chat/EdgeComposer.jsx';
 import { useI18n } from '../i18n/I18nContext.jsx';
 import { STORAGE_KEYS } from '../components/controls/constants.js';
 
@@ -58,7 +58,9 @@ export default function PetShell({
   onSwitchToWindowMode,
   bindPetHover,
   setPetHover,
-  textComposerProps,
+  showChatPanel = false,
+  onOpenChatPanel,
+  onCloseChatPanel,
 }) {
   const { t } = useI18n();
   const modelHoverRef = useRef(false);
@@ -67,7 +69,6 @@ export default function PetShell({
   const [isActivationRectHovering, setIsActivationRectHovering] = useState(false);
   const [isModelHovering, setIsModelHovering] = useState(false);
   const [isControlsHovering, setIsControlsHovering] = useState(false);
-  const [isComposerExpanded, setIsComposerExpanded] = useState(false);
   const [isModelLocked, setIsModelLocked] = useState(false);
 
   const setModelHover = useCallback(
@@ -212,13 +213,12 @@ export default function PetShell({
       setPetHover?.('live2d-hitbox', false);
       setPetHover?.('pet-dragging', false);
       setPetHover?.('pet-bottom-controls', false);
-      setPetHover?.('pet-composer', false);
     },
     [setPetHover],
   );
 
   const controlsVisible =
-    isActivationRectHovering || isModelHovering || isDragging || isControlsHovering || isComposerExpanded;
+    isActivationRectHovering || isModelHovering || isDragging || isControlsHovering || showChatPanel;
   const controlsHoverBindings = bindPetHover?.('pet-bottom-controls') ?? {};
 
   const stageClassName = ['live2d-stage', 'pet-mode', desktopMode ? `platform-${platform}` : '']
@@ -308,14 +308,21 @@ export default function PetShell({
           >
             {isModelLocked ? <LockIcon /> : <LockOpenIcon />}
           </IconButton>
-          <EdgeComposer
-            variant="pet"
-            onExpandedChange={(expanded) => {
-              setIsComposerExpanded(expanded);
-              setPetHover?.('pet-composer', expanded);
+          <IconButton
+            className="mode-toggle pet-mode-toggle"
+            color={showChatPanel ? 'secondary' : 'primary'}
+            onClick={() => {
+              if (showChatPanel) {
+                onCloseChatPanel?.();
+              } else {
+                onOpenChatPanel?.();
+              }
             }}
-            {...textComposerProps}
-          />
+            title={t('chat.openChat')}
+            aria-label={t('chat.openChat')}
+          >
+            <ChatIcon />
+          </IconButton>
         </Box>
       </Box>
     </Box>

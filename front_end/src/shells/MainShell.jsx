@@ -1,10 +1,10 @@
 import { Box, IconButton } from '@mui/material';
 import TuneIcon from '@mui/icons-material/Tune';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+import ChatIcon from '@mui/icons-material/Chat';
 import Live2DViewer from '../components/live2d/Live2DViewer.jsx';
 import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import WindowTitleBar from '../components/window/WindowTitleBar.jsx';
-import EdgeComposer from '../components/chat/EdgeComposer.jsx';
 import { useI18n } from '../i18n/I18nContext.jsx';
 
 export default function MainShell({
@@ -20,7 +20,8 @@ export default function MainShell({
   onOpenConfigPanel,
   onSwitchToPetMode,
   onWindowControl,
-  textComposerProps,
+  showChatPanel = false,
+  onOpenChatPanel,
 }) {
   const { t } = useI18n();
   const stageClassName = ['live2d-stage', 'window-mode', desktopMode ? `platform-${platform}` : '']
@@ -80,7 +81,15 @@ export default function MainShell({
             <SwapHorizIcon />
           </IconButton>
         )}
-        <EdgeComposer variant="main" {...textComposerProps} />
+        <IconButton
+          className="mode-toggle"
+          color={showChatPanel ? 'secondary' : 'primary'}
+          onClick={onOpenChatPanel}
+          title={t('chat.openChat')}
+          aria-label={t('chat.openChat')}
+        >
+          <ChatIcon />
+        </IconButton>
       </Box>
 
       <SubtitleBar text={subtitleText} />
