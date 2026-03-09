@@ -4,6 +4,7 @@ import {
   Button,
   Drawer,
   IconButton,
+  Paper,
   TextField,
   Tooltip,
   Typography,
@@ -29,6 +30,8 @@ export default function ChatSidebar({
   variant = 'main',
   isPetMode = false,
   isNarrowViewport = false,
+  petHoverBindings = {},
+  captureShortcutToken = 0,
   messages = [],
   onClearHistory,
   isStreaming = false,
@@ -48,6 +51,7 @@ export default function ChatSidebar({
   const inputRef = useRef(null);
   const bottomRef = useRef(null);
   const captureDraftRef = useRef(null);
+  const lastCaptureShortcutTokenRef = useRef(captureShortcutToken);
 
   const [value, setValue] = useState('');
   const [localError, setLocalError] = useState('');
@@ -61,6 +65,7 @@ export default function ChatSidebar({
   );
 
   const drawerWidth = variant === 'pet' ? CHAT_SIDEBAR_WIDTH_PET : CHAT_SIDEBAR_WIDTH;
+  const isPetVariant = variant === 'pet' || isPetMode;
   // In pet mode or narrow viewport, use temporary (overlay) drawer
   const drawerVariant = isPetMode || isNarrowViewport ? 'temporary' : 'persistent';
 
@@ -93,19 +98,19 @@ export default function ChatSidebar({
   );
 
   const clearCaptureDraft = useCallback(
-    (capture = captureDraft, { release = true } = {}) => {
+    (capture = captureDraftRef.current, { release = true } = {}) => {
       if (release && capture?.captureId) {
         void onReleaseCapture?.(capture.captureId);
       }
       setCaptureDraft(null);
       captureDraftRef.current = null;
     },
-    [captureDraft, onReleaseCapture],
+    [onReleaseCapture],
   );
 
   const submit = useCallback(async () => {
     const trimmed = value.trim();
-    if (!trimmed && !captureDraftRef.current) {
+    if (!trimmed) {
       setLocalError(t('composer.emptyInput'));
       return;
     }
@@ -143,7 +148,7 @@ export default function ChatSidebar({
   );
 
   const handleCaptureClick = useCallback(async () => {
-    if (captureDraft) {
+    if (captureDraftRef.current) {
       clearCaptureDraft();
       return;
     }
@@ -169,7 +174,50 @@ export default function ChatSidebar({
     } finally {
       setIsCapturing(false);
     }
-  }, [canCaptureScreen, captureDraft, clearCaptureDraft, onCaptureScreen, t]);
+  }, [canCaptureScreen, clearCaptureDraft, onCaptureScreen, t]);
+
+  useEffect(() => {
+    if (!open || !canCaptureScreen) {
+      return;
+    }
+
+    if (captureShortcutToken === lastCaptureShortcutTokenRef.current) {
+      return;
+    }
+
+    lastCaptureShortcutTokenRef.current = captureShortcutToken;
+    if (!isStreaming && !isCapturing) {
+      void handleCaptureClick();
+    }
+  }, [
+    canCaptureScreen,
+    captureShortcutToken,
+    handleCaptureClick,
+    isCapturing,
+    isStreaming,
+    open,
+  ]);
+
+  const handleDrawerClose = useCallback(() => {
+    clearCaptureDraft();
+    onClose?.();
+  }, [clearCaptureDraft, onClose]);
+
+  useEffect(() => {
+    if (!open) {
+      clearCaptureDraft();
+      setLocalError('');
+    }
+  }, [clearCaptureDraft, open]);
+
+  useEffect(
+    () => () => {
+      if (captureDraftRef.current?.captureId) {
+        void onReleaseCapture?.(captureDraftRef.current.captureId);
+      }
+    },
+    [onReleaseCapture],
+  );
 
   const handleClearHistory = useCallback(() => {
     if (window.confirm(t('chat.clearHistoryConfirm'))) {
@@ -179,11 +227,189 @@ export default function ChatSidebar({
 
   const displayName = characterName || t('chat.sidebarTitle');
 
+  const content = (
+    <div className="chat-sidebar">
+      {/* Header */}
+      <div className="chat-sidebar-header">
+        <ChatIcon className="chat-sidebar-header-icon" fontSize="small" />
+        <Typography className="chat-sidebar-title" variant="subtitle1" component="h2" noWrap>
+          {displayName}
+        </Typography>
+        <Box sx={{ flex: 1 }} />
+        {messages.length > 0 && (
+          <Tooltip title={t('chat.clearHistory')}>
+            <IconButton
+              size="small"
+              onClick={handleClearHistory}
+              className="chat-sidebar-action-btn"
+              aria-label={t('chat.clearHistory')}
+            >
+              <DeleteOutlineIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+        <Tooltip title={t('common.close')}>
+          <IconButton
+            size="small"
+            onClick={handleDrawerClose}
+            className="chat-sidebar-action-btn"
+            aria-label={t('common.close')}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </div>
+
+      {/* Message list */}
+      <div className="chat-message-list" role="log" aria-live="polite" aria-label={t('chat.sidebarTitle')}>
+        {messages.length === 0 ? (
+          <div className="chat-empty-hint">{t('chat.emptyHint')}</div>
+        ) : (
+          messages.map((msg) => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              characterName={characterName}
+            />
+          ))
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input area */}
+      <div className="chat-input-area">
+        {captureDraft && (
+          <div className="chat-capture-badge">
+            <span className="chat-capture-badge-icon">📷</span>
+            <span className="chat-capture-badge-label">{t('chat.captureAttached')}</span>
+            <IconButton
+              size="small"
+              onClick={() => clearCaptureDraft()}
+              aria-label={t('composer.captureRemove')}
+              className="chat-capture-badge-remove"
+            >
+              <CloseIcon fontSize="inherit" />
+            </IconButton>
+          </div>
+        )}
+
+        {effectiveError && (
+          <div className="chat-input-error">{effectiveError}</div>
+        )}
+
+        <TextField
+          inputRef={inputRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onCompositionStart={() => setIsImeComposing(true)}
+          onCompositionEnd={() => setIsImeComposing(false)}
+          placeholder={t('chat.placeholder')}
+          multiline
+          minRows={variant === 'pet' ? 2 : 3}
+          maxRows={6}
+          fullWidth
+          variant="outlined"
+          size="small"
+          disabled={isCapturing}
+          className="chat-input-field"
+          inputProps={{ maxLength: 400 }}
+        />
+
+        <div className="chat-input-toolbar">
+          <div className="chat-input-toolbar-left">
+            {/* Voice toggle */}
+            <Tooltip
+              title={voiceEnabled ? t('composer.voiceDisableTitle') : t('composer.voiceEnableTitle')}
+            >
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={onToggleVoice}
+                  disabled={voiceToggleDisabled}
+                  color={voiceEnabled ? 'secondary' : 'default'}
+                  className="chat-toolbar-btn"
+                  aria-label={voiceEnabled ? t('composer.voiceDisableTitle') : t('composer.voiceEnableTitle')}
+                >
+                  {voiceEnabled ? <MicOffIcon fontSize="small" /> : <MicIcon fontSize="small" />}
+                </IconButton>
+              </span>
+            </Tooltip>
+
+            {/* Screenshot */}
+            {canCaptureScreen && (
+              <Tooltip title={t('composer.captureTitle')}>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={handleCaptureClick}
+                    disabled={isStreaming || isCapturing}
+                    color={captureDraft ? 'secondary' : 'default'}
+                    className="chat-toolbar-btn"
+                    aria-label={t('composer.captureTitle')}
+                  >
+                    <ContentCutIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+          </div>
+
+          <div className="chat-input-toolbar-right">
+            {isStreaming ? (
+              <Button
+                size="small"
+                variant="outlined"
+                color="error"
+                startIcon={<StopCircleIcon />}
+                onClick={onStop}
+                className="chat-send-btn"
+              >
+                {t('chat.stop')}
+              </Button>
+            ) : (
+              <Button
+                size="small"
+                variant="contained"
+                color="primary"
+                startIcon={<SendIcon />}
+                onClick={submit}
+                disabled={!value.trim()}
+                className="chat-send-btn"
+              >
+                {t('chat.send')}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (isPetVariant) {
+    if (!open) {
+      return null;
+    }
+
+    return (
+      <div
+        className="chat-pet-float-layer"
+        onMouseDown={(event) => event.stopPropagation()}
+        onMouseEnter={(event) => petHoverBindings?.onMouseEnter?.(event)}
+        onMouseLeave={(event) => petHoverBindings?.onMouseLeave?.(event)}
+      >
+        <Paper className="chat-sidebar-paper chat-pet-float-panel" style={{ width: drawerWidth }} elevation={12}>
+          {content}
+        </Paper>
+      </div>
+    );
+  }
+
   return (
     <Drawer
       anchor="right"
       open={open}
-      onClose={onClose}
+      onClose={handleDrawerClose}
       variant={drawerVariant}
       PaperProps={{
         className: 'chat-sidebar-paper',
@@ -191,162 +417,7 @@ export default function ChatSidebar({
       }}
       ModalProps={{ keepMounted: false }}
     >
-      <div className="chat-sidebar">
-        {/* Header */}
-        <div className="chat-sidebar-header">
-          <ChatIcon className="chat-sidebar-header-icon" fontSize="small" />
-          <Typography className="chat-sidebar-title" variant="subtitle1" component="h2" noWrap>
-            {displayName}
-          </Typography>
-          <Box sx={{ flex: 1 }} />
-          {messages.length > 0 && (
-            <Tooltip title={t('chat.clearHistory')}>
-              <IconButton
-                size="small"
-                onClick={handleClearHistory}
-                className="chat-sidebar-action-btn"
-                aria-label={t('chat.clearHistory')}
-              >
-                <DeleteOutlineIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-          <Tooltip title={t('common.close')}>
-            <IconButton
-              size="small"
-              onClick={onClose}
-              className="chat-sidebar-action-btn"
-              aria-label={t('common.close')}
-            >
-              <CloseIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </div>
-
-        {/* Message list */}
-        <div className="chat-message-list" role="log" aria-live="polite" aria-label={t('chat.sidebarTitle')}>
-          {messages.length === 0 ? (
-            <div className="chat-empty-hint">{t('chat.emptyHint')}</div>
-          ) : (
-            messages.map((msg) => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                characterName={characterName}
-              />
-            ))
-          )}
-          <div ref={bottomRef} />
-        </div>
-
-        {/* Input area */}
-        <div className="chat-input-area">
-          {captureDraft && (
-            <div className="chat-capture-badge">
-              <span className="chat-capture-badge-icon">📷</span>
-              <span className="chat-capture-badge-label">{t('chat.captureAttached')}</span>
-              <IconButton
-                size="small"
-                onClick={() => clearCaptureDraft()}
-                aria-label={t('composer.captureRemove')}
-                className="chat-capture-badge-remove"
-              >
-                <CloseIcon fontSize="inherit" />
-              </IconButton>
-            </div>
-          )}
-
-          {effectiveError && (
-            <div className="chat-input-error">{effectiveError}</div>
-          )}
-
-          <TextField
-            inputRef={inputRef}
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onCompositionStart={() => setIsImeComposing(true)}
-            onCompositionEnd={() => setIsImeComposing(false)}
-            placeholder={t('chat.placeholder')}
-            multiline
-            minRows={variant === 'pet' ? 2 : 3}
-            maxRows={6}
-            fullWidth
-            variant="outlined"
-            size="small"
-            disabled={isCapturing}
-            className="chat-input-field"
-            inputProps={{ maxLength: 400 }}
-          />
-
-          <div className="chat-input-toolbar">
-            <div className="chat-input-toolbar-left">
-              {/* Voice toggle */}
-              <Tooltip
-                title={voiceEnabled ? t('composer.voiceDisableTitle') : t('composer.voiceEnableTitle')}
-              >
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={onToggleVoice}
-                    disabled={voiceToggleDisabled}
-                    color={voiceEnabled ? 'secondary' : 'default'}
-                    className="chat-toolbar-btn"
-                    aria-label={voiceEnabled ? t('composer.voiceDisableTitle') : t('composer.voiceEnableTitle')}
-                  >
-                    {voiceEnabled ? <MicOffIcon fontSize="small" /> : <MicIcon fontSize="small" />}
-                  </IconButton>
-                </span>
-              </Tooltip>
-
-              {/* Screenshot */}
-              {canCaptureScreen && (
-                <Tooltip title={t('composer.captureTitle')}>
-                  <span>
-                    <IconButton
-                      size="small"
-                      onClick={handleCaptureClick}
-                      disabled={isStreaming || isCapturing}
-                      color={captureDraft ? 'secondary' : 'default'}
-                      className="chat-toolbar-btn"
-                      aria-label={t('composer.captureTitle')}
-                    >
-                      <ContentCutIcon fontSize="small" />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              )}
-            </div>
-
-            <div className="chat-input-toolbar-right">
-              {isStreaming ? (
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="error"
-                  startIcon={<StopCircleIcon />}
-                  onClick={onStop}
-                  className="chat-send-btn"
-                >
-                  {t('chat.stop')}
-                </Button>
-              ) : (
-                <Button
-                  size="small"
-                  variant="contained"
-                  color="primary"
-                  startIcon={<SendIcon />}
-                  onClick={submit}
-                  disabled={!value.trim() && !captureDraft}
-                  className="chat-send-btn"
-                >
-                  {t('chat.send')}
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      {content}
     </Drawer>
   );
 }

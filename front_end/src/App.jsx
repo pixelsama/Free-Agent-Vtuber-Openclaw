@@ -45,7 +45,15 @@ function AppContent({ desktopMode }) {
   const platform = usePlatformInfo({ desktopMode });
 
   // Chat history — persists to localStorage
-  const chatHistory = useChatHistory();
+  const {
+    messages: chatMessages,
+    addUserMessage,
+    startAiMessage,
+    appendAiDelta,
+    finalizeAiMessage,
+    cancelAiMessage,
+    clearHistory,
+  } = useChatHistory();
   const activeAiMsgIdRef = useRef(null);
 
   const { subtitleText, appendDelta, setSegmentText, finishStream, clearSubtitle, beginStream } = useSubtitleFeed();
@@ -68,30 +76,30 @@ function AppContent({ desktopMode }) {
       if (text) {
         const attachments =
           Array.isArray(extras?.attachments) ? extras.attachments : [];
-        chatHistory.addUserMessage(text, attachments);
-        activeAiMsgIdRef.current = chatHistory.startAiMessage();
+        addUserMessage(text, attachments);
+        activeAiMsgIdRef.current = startAiMessage();
       }
       return _startStreaming(sessionId, content, extras);
     },
-    [_startStreaming, chatHistory],
+    [_startStreaming, addUserMessage, startAiMessage],
   );
 
   // Track AI streaming response into chat history
   useEffect(() => {
     const handleDelta = (delta) => {
       if (activeAiMsgIdRef.current) {
-        chatHistory.appendAiDelta(activeAiMsgIdRef.current, delta);
+        appendAiDelta(activeAiMsgIdRef.current, delta);
       }
     };
     const handleDone = () => {
       if (activeAiMsgIdRef.current) {
-        chatHistory.finalizeAiMessage(activeAiMsgIdRef.current);
+        finalizeAiMessage(activeAiMsgIdRef.current);
         activeAiMsgIdRef.current = null;
       }
     };
     const handleError = () => {
       if (activeAiMsgIdRef.current) {
-        chatHistory.cancelAiMessage(activeAiMsgIdRef.current);
+        cancelAiMessage(activeAiMsgIdRef.current);
         activeAiMsgIdRef.current = null;
       }
     };
@@ -104,7 +112,7 @@ function AppContent({ desktopMode }) {
       detachDone();
       detachError();
     };
-  }, [chatHistory, onDelta, onDone, onError]);
+  }, [appendAiDelta, cancelAiMessage, finalizeAiMessage, onDelta, onDone, onError]);
 
   const normalizeError = useCallback((error) => normalizeErrorMessage(error, t), [t]);
   const {
@@ -287,6 +295,7 @@ function AppContent({ desktopMode }) {
 
   // Chat panel state — mutually exclusive with settings panel
   const [showChatPanel, setShowChatPanel] = useState(false);
+  const [petCaptureShortcutToken, setPetCaptureShortcutToken] = useState(0);
   const closeChatSyncTimeoutRef = useRef(null);
 
   const openChatPanel = useCallback(() => {
@@ -305,6 +314,11 @@ function AppContent({ desktopMode }) {
       live2dViewerRef.current?.syncCanvasSize?.();
     }, 260);
   }, [live2dViewerRef]);
+
+  const triggerPetQuickCapture = useCallback(() => {
+    openChatPanel();
+    setPetCaptureShortcutToken((current) => current + 1);
+  }, [openChatPanel]);
 
   // When settings opens, close chat panel (and vice versa is handled in openChatPanel)
   const openConfigPanel = useCallback(() => {
@@ -451,6 +465,23 @@ function AppContent({ desktopMode }) {
     isPetMode,
     updateHover: updatePetHover,
   });
+  const chatPanelHoverBindings = useMemo(
+    () => (isPetMode ? bindPetHover?.('pet-chat-panel') ?? {} : {}),
+    [bindPetHover, isPetMode],
+  );
+
+  useEffect(() => {
+    if (!isPetMode || !showChatPanel) {
+      setPetHover?.('pet-chat-panel', false);
+    }
+  }, [isPetMode, setPetHover, showChatPanel]);
+
+  useEffect(
+    () => () => {
+      setPetHover?.('pet-chat-panel', false);
+    },
+    [setPetHover],
+  );
 
   const controlWindow = useCallback(
     async (action) => {
@@ -520,6 +551,7 @@ function AppContent({ desktopMode }) {
           showChatPanel={showChatPanel}
           onOpenChatPanel={openChatPanel}
           onCloseChatPanel={closeChatPanel}
+          onQuickCapture={triggerPetQuickCapture}
         />
       ) : (
         <MainShell
@@ -574,10 +606,13 @@ function AppContent({ desktopMode }) {
       <ChatSidebar
         open={showChatPanel}
         onClose={closeChatPanel}
+        variant={isPetMode ? 'pet' : 'main'}
         isPetMode={isPetMode}
         isNarrowViewport={isNarrowViewport}
-        messages={chatHistory.messages}
-        onClearHistory={chatHistory.clearHistory}
+        petHoverBindings={chatPanelHoverBindings}
+        captureShortcutToken={isPetMode ? petCaptureShortcutToken : 0}
+        messages={chatMessages}
+        onClearHistory={clearHistory}
         isStreaming={isStreaming}
         {...textComposerWithVoiceProps}
       />

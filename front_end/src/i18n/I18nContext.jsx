@@ -159,6 +159,9 @@ const MESSAGES = {
     'chat.stop': '停止',
     'chat.captureAttached': '已附加截图',
     'chat.streamingLabel': '正在输入...',
+    'chat.attachmentSingle': '截图',
+    'chat.attachmentMultiple': '{count} 张截图',
+    'chat.messageSendFailed': '⚠ 发送失败',
 
     'model.status.loaded': '模型已加载',
     'model.status.loading': '加载中',
@@ -397,6 +400,9 @@ const MESSAGES = {
     'chat.stop': 'Stop',
     'chat.captureAttached': 'Screenshot attached',
     'chat.streamingLabel': 'Typing...',
+    'chat.attachmentSingle': 'Screenshot',
+    'chat.attachmentMultiple': '{count} screenshots',
+    'chat.messageSendFailed': '⚠ Send failed',
 
     'model.status.loaded': 'Model Loaded',
     'model.status.loading': 'Loading',

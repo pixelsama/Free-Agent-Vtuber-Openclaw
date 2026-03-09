@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { useI18n } from '../../i18n/I18nContext.jsx';
 import './MessageBubble.css';
 
 function formatTimestamp(ts) {
@@ -8,9 +9,9 @@ function formatTimestamp(ts) {
   return `${hh}:${mm}`;
 }
 
-function TypingDots() {
+function TypingDots({ label }) {
   return (
-    <span className="typing-dots" aria-label="typing">
+    <span className="typing-dots" aria-label={label}>
       <span />
       <span />
       <span />
@@ -19,10 +20,16 @@ function TypingDots() {
 }
 
 const MessageBubble = memo(function MessageBubble({ message, characterName = '' }) {
+  const { t } = useI18n();
   const { role, text, timestamp, isStreaming, failed, attachments } = message;
   const isUser = role === 'user';
   const hasText = typeof text === 'string' && text.length > 0;
   const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+  const attachmentLabel = hasAttachments
+    ? (attachments.length > 1
+      ? t('chat.attachmentMultiple', { count: attachments.length })
+      : t('chat.attachmentSingle'))
+    : '';
 
   return (
     <div className={`bubble-row ${isUser ? 'bubble-row--user' : 'bubble-row--ai'}`}>
@@ -47,15 +54,15 @@ const MessageBubble = memo(function MessageBubble({ message, characterName = '' 
           {hasAttachments && (
             <div className="bubble-attachment-row">
               <span className="bubble-attachment-icon">📷</span>
-              <span className="bubble-attachment-label">{attachments.length > 1 ? `${attachments.length} 张截图` : '截图'}</span>
+              <span className="bubble-attachment-label">{attachmentLabel}</span>
             </div>
           )}
 
           {isStreaming && !hasText ? (
-            <TypingDots />
+            <TypingDots label={t('chat.streamingLabel')} />
           ) : (
             <span className={isStreaming ? 'bubble-text bubble-text--streaming' : 'bubble-text'}>
-              {hasText ? text : (failed ? '⚠ 发送失败' : '')}
+              {hasText ? text : (failed ? t('chat.messageSendFailed') : '')}
             </span>
           )}
         </div>

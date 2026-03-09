@@ -4,6 +4,9 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import LockIcon from '@mui/icons-material/Lock';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
 import ChatIcon from '@mui/icons-material/Chat';
+import MicIcon from '@mui/icons-material/Mic';
+import MicOffIcon from '@mui/icons-material/MicOff';
+import ContentCutIcon from '@mui/icons-material/ContentCut';
 import Live2DViewer from '../components/live2d/Live2DViewer.jsx';
 import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import { usePetDraggable } from '../hooks/pet/usePetDraggable.js';
@@ -58,9 +61,11 @@ export default function PetShell({
   onSwitchToWindowMode,
   bindPetHover,
   setPetHover,
+  textComposerProps,
   showChatPanel = false,
   onOpenChatPanel,
   onCloseChatPanel,
+  onQuickCapture,
 }) {
   const { t } = useI18n();
   const modelHoverRef = useRef(false);
@@ -70,6 +75,13 @@ export default function PetShell({
   const [isModelHovering, setIsModelHovering] = useState(false);
   const [isControlsHovering, setIsControlsHovering] = useState(false);
   const [isModelLocked, setIsModelLocked] = useState(false);
+  const {
+    voiceEnabled = false,
+    voiceToggleDisabled = true,
+    onToggleVoice,
+    canCaptureScreen = false,
+    isStreaming = false,
+  } = textComposerProps || {};
 
   const setModelHover = useCallback(
     (nextHovering) => {
@@ -218,7 +230,12 @@ export default function PetShell({
   );
 
   const controlsVisible =
-    isActivationRectHovering || isModelHovering || isDragging || isControlsHovering || showChatPanel;
+    isActivationRectHovering
+    || isModelHovering
+    || isDragging
+    || isControlsHovering
+    || showChatPanel
+    || voiceEnabled;
   const controlsHoverBindings = bindPetHover?.('pet-bottom-controls') ?? {};
 
   const stageClassName = ['live2d-stage', 'pet-mode', desktopMode ? `platform-${platform}` : '']
@@ -308,6 +325,32 @@ export default function PetShell({
           >
             {isModelLocked ? <LockIcon /> : <LockOpenIcon />}
           </IconButton>
+          <IconButton
+            className="mode-toggle pet-mode-toggle"
+            color={voiceEnabled ? 'secondary' : 'primary'}
+            onClick={() => {
+              void onToggleVoice?.();
+            }}
+            title={voiceEnabled ? t('composer.voiceDisableTitle') : t('composer.voiceEnableTitle')}
+            aria-label={voiceEnabled ? t('composer.voiceDisableTitle') : t('composer.voiceEnableTitle')}
+            disabled={voiceToggleDisabled}
+          >
+            {voiceEnabled ? <MicOffIcon /> : <MicIcon />}
+          </IconButton>
+          {canCaptureScreen && (
+            <IconButton
+              className="mode-toggle pet-mode-toggle"
+              color="primary"
+              onClick={() => {
+                onQuickCapture?.();
+              }}
+              title={t('composer.captureTitle')}
+              aria-label={t('composer.captureTitle')}
+              disabled={isStreaming}
+            >
+              <ContentCutIcon />
+            </IconButton>
+          )}
           <IconButton
             className="mode-toggle pet-mode-toggle"
             color={showChatPanel ? 'secondary' : 'primary'}

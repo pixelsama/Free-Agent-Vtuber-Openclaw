@@ -8,6 +8,25 @@
   border-left: 1px solid var(--chat-sidebar-border) !important;
 }
 
+/* ── Pet mode floating panel ────────────────────────────────────────── */
+
+.chat-pet-float-layer {
+  position: fixed;
+  right: 16px;
+  bottom: 96px;
+  z-index: 1400;
+  pointer-events: auto;
+}
+
+.chat-pet-float-panel {
+  width: min(360px, calc(100vw - 24px));
+  height: min(70vh, 520px);
+  max-height: calc(100vh - 120px);
+  border-radius: 12px;
+  border: 1px solid var(--chat-sidebar-border);
+  box-shadow: 0 14px 36px rgba(10, 20, 40, 0.35) !important;
+}
+
 /* ── Root layout ────────────────────────────────────────────────────── */
 
 .chat-sidebar {
