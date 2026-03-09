@@ -31,7 +31,6 @@ export default function ChatSidebar({
   isPetMode = false,
   isNarrowViewport = false,
   petHoverBindings = {},
-  captureShortcutToken = 0,
   messages = [],
   onClearHistory,
   isStreaming = false,
@@ -41,7 +40,8 @@ export default function ChatSidebar({
   onDismissExternalError,
   canCaptureScreen = false,
   onCaptureScreen,
-  onReleaseCapture,
+  captureDraft = null,
+  onClearCaptureDraft,
   voiceEnabled = false,
   voiceToggleDisabled = true,
   onToggleVoice,
@@ -50,13 +50,10 @@ export default function ChatSidebar({
   const { t } = useI18n();
   const inputRef = useRef(null);
   const bottomRef = useRef(null);
-  const captureDraftRef = useRef(null);
-  const lastCaptureShortcutTokenRef = useRef(captureShortcutToken);
 
   const [value, setValue] = useState('');
   const [localError, setLocalError] = useState('');
   const [isImeComposing, setIsImeComposing] = useState(false);
-  const [captureDraft, setCaptureDraft] = useState(null);
   const [isCapturing, setIsCapturing] = useState(false);
 
   const effectiveError = useMemo(
@@ -97,17 +94,6 @@ export default function ChatSidebar({
     [externalError, onDismissExternalError],
   );
 
-  const clearCaptureDraft = useCallback(
-    (capture = captureDraftRef.current, { release = true } = {}) => {
-      if (release && capture?.captureId) {
-        void onReleaseCapture?.(capture.captureId);
-      }
-      setCaptureDraft(null);
-      captureDraftRef.current = null;
-    },
-    [onReleaseCapture],
-  );
-
   const submit = useCallback(async () => {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -116,12 +102,10 @@ export default function ChatSidebar({
     }
 
     setLocalError('');
-    const draft = captureDraftRef.current;
     setValue('');
-    clearCaptureDraft(draft, { release: false });
 
-    const submitOptions = draft
-      ? { attachments: [{ kind: 'capture-image', captureId: draft.captureId }] }
+    const submitOptions = captureDraft
+      ? { attachments: [{ kind: 'capture-image', captureId: captureDraft.captureId }] }
       : {};
 
     try {
@@ -133,7 +117,7 @@ export default function ChatSidebar({
           : t('common.sendFailed'),
       );
     }
-  }, [clearCaptureDraft, onSubmit, t, value]);
+  }, [captureDraft, onSubmit, t, value]);
 
   const handleKeyDown = useCallback(
     (e) => {
@@ -148,8 +132,8 @@ export default function ChatSidebar({
   );
 
   const handleCaptureClick = useCallback(async () => {
-    if (captureDraftRef.current) {
-      clearCaptureDraft();
+    if (captureDraft?.captureId) {
+      onClearCaptureDraft?.();
       return;
     }
 
@@ -159,65 +143,23 @@ export default function ChatSidebar({
 
     setIsCapturing(true);
     try {
-      const result = await onCaptureScreen?.();
-      if (result?.captureId) {
-        const draft = {
-          captureId: result.captureId,
-          previewUrl: result.previewUrl || null,
-          name: result.name || '',
-        };
-        captureDraftRef.current = draft;
-        setCaptureDraft(draft);
-      }
+      await onCaptureScreen?.();
     } catch {
       setLocalError(t('composer.captureSaveFailed'));
     } finally {
       setIsCapturing(false);
     }
-  }, [canCaptureScreen, clearCaptureDraft, onCaptureScreen, t]);
-
-  useEffect(() => {
-    if (!open || !canCaptureScreen) {
-      return;
-    }
-
-    if (captureShortcutToken === lastCaptureShortcutTokenRef.current) {
-      return;
-    }
-
-    lastCaptureShortcutTokenRef.current = captureShortcutToken;
-    if (!isStreaming && !isCapturing) {
-      void handleCaptureClick();
-    }
-  }, [
-    canCaptureScreen,
-    captureShortcutToken,
-    handleCaptureClick,
-    isCapturing,
-    isStreaming,
-    open,
-  ]);
+  }, [canCaptureScreen, captureDraft?.captureId, onCaptureScreen, onClearCaptureDraft, t]);
 
   const handleDrawerClose = useCallback(() => {
-    clearCaptureDraft();
     onClose?.();
-  }, [clearCaptureDraft, onClose]);
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) {
-      clearCaptureDraft();
       setLocalError('');
     }
-  }, [clearCaptureDraft, open]);
-
-  useEffect(
-    () => () => {
-      if (captureDraftRef.current?.captureId) {
-        void onReleaseCapture?.(captureDraftRef.current.captureId);
-      }
-    },
-    [onReleaseCapture],
-  );
+  }, [open]);
 
   const handleClearHistory = useCallback(() => {
     if (window.confirm(t('chat.clearHistoryConfirm'))) {
@@ -284,7 +226,7 @@ export default function ChatSidebar({
             <span className="chat-capture-badge-label">{t('chat.captureAttached')}</span>
             <IconButton
               size="small"
-              onClick={() => clearCaptureDraft()}
+              onClick={() => onClearCaptureDraft?.()}
               aria-label={t('composer.captureRemove')}
               className="chat-capture-badge-remove"
             >

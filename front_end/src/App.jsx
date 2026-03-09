@@ -55,6 +55,8 @@ function AppContent({ desktopMode }) {
     clearHistory,
   } = useChatHistory();
   const activeAiMsgIdRef = useRef(null);
+  const [pendingCaptureDraft, setPendingCaptureDraft] = useState(null);
+  const pendingCaptureDraftRef = useRef(null);
 
   const { subtitleText, appendDelta, setSegmentText, finishStream, clearSubtitle, beginStream } = useSubtitleFeed();
   const { startStreaming: _startStreaming, cancelStreaming, onDelta, onSegmentReady, onDone, onError, isStreaming } =
@@ -73,13 +75,28 @@ function AppContent({ desktopMode }) {
   const startStreaming = useCallback(
     async (sessionId, content, extras) => {
       const text = typeof content === 'string' ? content.trim() : '';
+      const attachments =
+        Array.isArray(extras?.attachments) ? extras.attachments : [];
       if (text) {
-        const attachments =
-          Array.isArray(extras?.attachments) ? extras.attachments : [];
         addUserMessage(text, attachments);
         activeAiMsgIdRef.current = startAiMessage();
       }
-      return _startStreaming(sessionId, content, extras);
+
+      const pendingCapture = pendingCaptureDraftRef.current;
+      const hasSubmittedPendingCapture = Boolean(
+        pendingCapture?.captureId
+          && attachments.some(
+            (attachment) =>
+              attachment?.kind === 'capture-image'
+              && attachment.captureId === pendingCapture.captureId,
+          ),
+      );
+      if (hasSubmittedPendingCapture) {
+        pendingCaptureDraftRef.current = null;
+        setPendingCaptureDraft(null);
+      }
+
+      await _startStreaming(sessionId, content, extras);
     },
     [_startStreaming, addUserMessage, startAiMessage],
   );
@@ -158,6 +175,76 @@ function AppContent({ desktopMode }) {
   } = useScreenCaptureController({
     desktopMode,
   });
+
+  const clearPendingCaptureDraft = useCallback(
+    ({ release = true } = {}) => {
+      const current = pendingCaptureDraftRef.current;
+      if (!current) {
+        return;
+      }
+
+      pendingCaptureDraftRef.current = null;
+      setPendingCaptureDraft(null);
+
+      if (release && current.captureId) {
+        void releaseCapture(current.captureId);
+      }
+    },
+    [releaseCapture],
+  );
+
+  const replacePendingCaptureDraft = useCallback(
+    (nextDraft) => {
+      const normalizedDraft =
+        nextDraft && typeof nextDraft.captureId === 'string' && nextDraft.captureId.trim()
+          ? {
+              captureId: nextDraft.captureId.trim(),
+              previewUrl:
+                typeof nextDraft.previewUrl === 'string' && nextDraft.previewUrl.trim()
+                  ? nextDraft.previewUrl
+                  : null,
+              name: typeof nextDraft.name === 'string' ? nextDraft.name : '',
+            }
+          : null;
+
+      const current = pendingCaptureDraftRef.current;
+      if (
+        current?.captureId
+        && current.captureId !== normalizedDraft?.captureId
+      ) {
+        void releaseCapture(current.captureId);
+      }
+
+      pendingCaptureDraftRef.current = normalizedDraft;
+      setPendingCaptureDraft(normalizedDraft);
+      return normalizedDraft;
+    },
+    [releaseCapture],
+  );
+
+  const captureScreenToPendingDraft = useCallback(async () => {
+    const result = await startScreenCapture();
+    if (!result?.captureId) {
+      return result || null;
+    }
+
+    return replacePendingCaptureDraft({
+      captureId: result.captureId,
+      previewUrl: result.previewUrl || null,
+      name: result.name || '',
+    });
+  }, [replacePendingCaptureDraft, startScreenCapture]);
+
+  useEffect(
+    () => () => {
+      const current = pendingCaptureDraftRef.current;
+      if (!current?.captureId) {
+        return;
+      }
+      void releaseCapture(current.captureId);
+    },
+    [releaseCapture],
+  );
 
   useEffect(() => {
     if (!desktopMode) {
@@ -302,7 +389,6 @@ function AppContent({ desktopMode }) {
 
   // Chat panel state — mutually exclusive with settings panel
   const [showChatPanel, setShowChatPanel] = useState(false);
-  const [petCaptureShortcutToken, setPetCaptureShortcutToken] = useState(0);
   const closeChatSyncTimeoutRef = useRef(null);
 
   const openChatPanel = useCallback(() => {
@@ -321,11 +407,6 @@ function AppContent({ desktopMode }) {
       live2dViewerRef.current?.syncCanvasSize?.();
     }, 260);
   }, [live2dViewerRef]);
-
-  const triggerPetQuickCapture = useCallback(() => {
-    openChatPanel();
-    setPetCaptureShortcutToken((current) => current + 1);
-  }, [openChatPanel]);
 
   // When settings opens, close chat panel (and vice versa is handled in openChatPanel)
   const openConfigPanel = useCallback(() => {
@@ -355,6 +436,11 @@ function AppContent({ desktopMode }) {
     cancelStreaming,
     isStreaming,
   });
+  const triggerPetQuickCapture = useCallback(() => {
+    void captureScreenToPendingDraft().catch((error) => {
+      setComposerExternalError(typeof error?.message === 'string' ? error.message : '');
+    });
+  }, [captureScreenToPendingDraft, setComposerExternalError]);
   const submitVoiceText = useCallback(
     async (content, request = {}) => {
       const streamRequest = buildVoiceStreamRequest({
@@ -375,8 +461,39 @@ function AppContent({ desktopMode }) {
         source: streamRequest.extras?.options?.source || 'voice-asr',
         textLength: streamRequest.content.length,
       });
+
+      const pendingCapture = pendingCaptureDraftRef.current;
+      const baseAttachments = Array.isArray(streamRequest.extras?.attachments)
+        ? streamRequest.extras.attachments
+        : [];
+      const hasPendingCaptureAttachment = Boolean(
+        pendingCapture?.captureId
+        && baseAttachments.some(
+          (attachment) =>
+            attachment?.kind === 'capture-image'
+            && attachment.captureId === pendingCapture.captureId,
+        ),
+      );
+      const attachments =
+        pendingCapture?.captureId && !hasPendingCaptureAttachment
+          ? [
+              ...baseAttachments,
+              {
+                kind: 'capture-image',
+                captureId: pendingCapture.captureId,
+              },
+            ]
+          : baseAttachments;
+      const extras =
+        attachments === baseAttachments
+          ? streamRequest.extras
+          : {
+              ...streamRequest.extras,
+              attachments,
+            };
+
       beginStream();
-      await startStreaming(streamRequest.sessionId, streamRequest.content, streamRequest.extras);
+      await startStreaming(streamRequest.sessionId, streamRequest.content, extras);
       console.info('[voice-submit] Streaming chat request started for voice text.', {
         sessionId: streamRequest.sessionId,
         source: streamRequest.extras?.options?.source || 'voice-asr',
@@ -392,21 +509,32 @@ function AppContent({ desktopMode }) {
       await cancelStreaming();
     },
   });
+  const voicePermissionWarningText = t('voice.permissionDeniedBanner');
+  const showVoicePermissionWarning = Boolean(voiceMicToggle.microphonePermissionDenied);
+
+  useEffect(() => {
+    if (voiceMicToggle.microphonePermissionDenied) {
+      setComposerExternalError(voicePermissionWarningText);
+    }
+  }, [setComposerExternalError, voiceMicToggle.microphonePermissionDenied, voicePermissionWarningText]);
+
   const textComposerWithVoiceProps = useMemo(
     () => ({
       ...textComposerProps,
       canCaptureScreen: desktopMode && chatBackendSettings.chatBackend === 'nanobot',
-      onCaptureScreen: startScreenCapture,
-      onReleaseCapture: releaseCapture,
+      onCaptureScreen: captureScreenToPendingDraft,
+      captureDraft: pendingCaptureDraft,
+      onClearCaptureDraft: clearPendingCaptureDraft,
       voiceEnabled: voiceMicToggle.isEnabled,
       voiceToggleDisabled: !voiceMicToggle.isAvailable || voiceMicToggle.isBusy,
       onToggleVoice: voiceMicToggle.toggleVoice,
     }),
     [
       chatBackendSettings.chatBackend,
+      clearPendingCaptureDraft,
+      captureScreenToPendingDraft,
       desktopMode,
-      releaseCapture,
-      startScreenCapture,
+      pendingCaptureDraft,
       textComposerProps,
       voiceMicToggle.isAvailable,
       voiceMicToggle.isBusy,
@@ -559,6 +687,10 @@ function AppContent({ desktopMode }) {
           onOpenChatPanel={openChatPanel}
           onCloseChatPanel={closeChatPanel}
           onQuickCapture={triggerPetQuickCapture}
+          captureDraft={pendingCaptureDraft}
+          onClearCaptureDraft={clearPendingCaptureDraft}
+          showVoicePermissionWarning={showVoicePermissionWarning}
+          voicePermissionWarningText={voicePermissionWarningText}
         />
       ) : (
         <MainShell
@@ -577,6 +709,8 @@ function AppContent({ desktopMode }) {
           textComposerProps={textComposerWithVoiceProps}
           showChatPanel={showChatPanel}
           onOpenChatPanel={openChatPanel}
+          showVoicePermissionWarning={showVoicePermissionWarning}
+          voicePermissionWarningText={voicePermissionWarningText}
         />
       )}
 
@@ -624,7 +758,6 @@ function AppContent({ desktopMode }) {
         isPetMode={isPetMode}
         isNarrowViewport={isNarrowViewport}
         petHoverBindings={chatPanelHoverBindings}
-        captureShortcutToken={isPetMode ? petCaptureShortcutToken : 0}
         messages={chatMessages}
         onClearHistory={clearHistory}
         isStreaming={isStreaming}

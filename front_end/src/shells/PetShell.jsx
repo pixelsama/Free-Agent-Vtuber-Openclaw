@@ -7,6 +7,7 @@ import ChatIcon from '@mui/icons-material/Chat';
 import MicIcon from '@mui/icons-material/Mic';
 import MicOffIcon from '@mui/icons-material/MicOff';
 import ContentCutIcon from '@mui/icons-material/ContentCut';
+import CloseIcon from '@mui/icons-material/Close';
 import Live2DViewer from '../components/live2d/Live2DViewer.jsx';
 import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import { usePetDraggable } from '../hooks/pet/usePetDraggable.js';
@@ -66,6 +67,10 @@ export default function PetShell({
   onOpenChatPanel,
   onCloseChatPanel,
   onQuickCapture,
+  captureDraft = null,
+  onClearCaptureDraft,
+  showVoicePermissionWarning = false,
+  voicePermissionWarningText = '',
 }) {
   const { t } = useI18n();
   const modelHoverRef = useRef(false);
@@ -237,6 +242,7 @@ export default function PetShell({
     || showChatPanel
     || voiceEnabled;
   const controlsHoverBindings = bindPetHover?.('pet-bottom-controls') ?? {};
+  const captureHoverBindings = bindPetHover?.('pet-capture-preview') ?? {};
 
   const stageClassName = ['live2d-stage', 'pet-mode', desktopMode ? `platform-${platform}` : '']
     .filter(Boolean)
@@ -367,6 +373,50 @@ export default function PetShell({
             <ChatIcon />
           </IconButton>
         </Box>
+        {captureDraft?.captureId && (
+          <Box
+            className="pet-capture-preview"
+            onMouseEnter={(event) => {
+              captureHoverBindings.onMouseEnter?.(event);
+            }}
+            onMouseLeave={(event) => {
+              captureHoverBindings.onMouseLeave?.(event);
+            }}
+            onPointerDownCapture={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            {captureDraft.previewUrl ? (
+              <img
+                src={captureDraft.previewUrl}
+                alt={t('composer.capturePreviewAlt')}
+                className="pet-capture-preview-image"
+              />
+            ) : (
+              <Box className="pet-capture-preview-placeholder">📷</Box>
+            )}
+            <Box className="pet-capture-preview-meta">
+              <Box className="pet-capture-preview-title">{t('composer.captureAttached')}</Box>
+              {captureDraft.name ? (
+                <Box className="pet-capture-preview-name">{captureDraft.name}</Box>
+              ) : null}
+            </Box>
+            <IconButton
+              size="small"
+              className="pet-capture-preview-remove"
+              onClick={() => {
+                onClearCaptureDraft?.();
+              }}
+              title={t('composer.captureRemove')}
+              aria-label={t('composer.captureRemove')}
+            >
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Box>
+        )}
+        {showVoicePermissionWarning && voicePermissionWarningText ? (
+          <Box className="pet-voice-warning">{voicePermissionWarningText}</Box>
+        ) : null}
       </Box>
     </Box>
   );

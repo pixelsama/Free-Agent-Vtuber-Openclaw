@@ -8,6 +8,8 @@ import { desktopBridge } from '../../services/desktopBridge.js';
 const DEFAULT_FRAME_SAMPLES = 320;
 const DEFAULT_AUTO_SUBMIT_DELAY_MS = 1500;
 const DEFAULT_INTERRUPT_CONFIRM_MS = 200;
+const DEFAULT_MIC_PERMISSION_TIMEOUT_MS = 10000;
+const DEFAULT_VAD_START_TIMEOUT_MS = 15000;
 function getDefaultVoiceToggleHotkey() {
   if (typeof navigator === 'object' && /mac/i.test(navigator.platform || '')) {
     return 'F8';
@@ -89,6 +91,65 @@ function previewText(value, limit = 80) {
   return `${normalized.slice(0, limit)}...`;
 }
 
+function isMicrophonePermissionDeniedReason(value) {
+  const reason = typeof value === 'string' ? value.trim() : '';
+  if (!reason) {
+    return false;
+  }
+
+  return (
+    reason === 'NotAllowedError'
+    || reason === 'PermissionDeniedError'
+    || reason === 'SecurityError'
+    || reason === 'microphone_permission_denied'
+  );
+}
+
+async function requestMicrophonePermission({
+  timeoutMs = DEFAULT_MIC_PERMISSION_TIMEOUT_MS,
+} = {}) {
+  if (
+    typeof navigator === 'undefined'
+    || !navigator.mediaDevices
+    || typeof navigator.mediaDevices.getUserMedia !== 'function'
+  ) {
+    return { ok: true, reason: 'media_devices_unavailable' };
+  }
+
+  let timeoutId = null;
+  let stream = null;
+  try {
+    stream = await Promise.race([
+      navigator.mediaDevices.getUserMedia({ audio: true }),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          const error = new Error('microphone_permission_timeout');
+          error.name = 'TimeoutError';
+          reject(error);
+        }, timeoutMs);
+      }),
+    ]);
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error?.name || 'microphone_permission_failed',
+      message: error?.message || 'microphone_permission_failed',
+    };
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+
+    try {
+      stream?.getTracks?.().forEach((track) => track.stop());
+    } catch {
+      // noop
+    }
+  }
+}
+
 export async function stopVoiceCaptureAndSubmit({
   reason = 'manual',
   stopVad = async () => ({ ok: true }),
@@ -148,6 +209,7 @@ export function useVoiceMicToggle({
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isProcessingSpeech, setIsProcessingSpeech] = useState(false);
   const [capturedFrames, setCapturedFrames] = useState(0);
+  const [microphonePermission, setMicrophonePermission] = useState('unknown');
   const [localError, setLocalError] = useState('');
   const normalizedHotkey = useMemo(() => normalizeHotkeyLabel(toggleHotkey), [toggleHotkey]);
   const silenceSubmitDelayMs = useMemo(
@@ -738,6 +800,17 @@ export function useVoiceMicToggle({
     setLocalError('');
 
     try {
+      const permissionResult = await requestMicrophonePermission();
+      if (!permissionResult?.ok) {
+        const errorMessage = permissionResult.reason || permissionResult.message || 'microphone_permission_failed';
+        if (isMicrophonePermissionDeniedReason(errorMessage)) {
+          setMicrophonePermission('denied');
+        }
+        setLocalError(errorMessage);
+        return permissionResult;
+      }
+      setMicrophonePermission('granted');
+
       await stopSession({ reason: 'enable_voice' });
       await stopPlayback({
         emitFinalAck: false,
@@ -776,11 +849,18 @@ export function useVoiceMicToggle({
       segmentTextsRef.current = [];
       setCapturedFrames(0);
 
-      const vadStarted = await startVad({
-        onSpeechStart: async () => handleSpeechStart(nextEpoch),
-        onSpeechEnd: async (audioFloat32) => handleSpeechEnd(audioFloat32, nextEpoch),
-        onVADMisfire: async () => handleVADMisfire(nextEpoch),
-      });
+      const vadStarted = await Promise.race([
+        startVad({
+          onSpeechStart: async () => handleSpeechStart(nextEpoch),
+          onSpeechEnd: async (audioFloat32) => handleSpeechEnd(audioFloat32, nextEpoch),
+          onVADMisfire: async () => handleVADMisfire(nextEpoch),
+        }),
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({ ok: false, reason: 'silero_vad_init_timeout' });
+          }, DEFAULT_VAD_START_TIMEOUT_MS);
+        }),
+      ]);
 
       if (!vadStarted?.ok) {
         await stopSession({ reason: 'vad_start_failed' });
@@ -854,6 +934,49 @@ export function useVoiceMicToggle({
   useEffect(() => onEvent(handleVoiceEvent), [handleVoiceEvent, onEvent]);
 
   useEffect(() => {
+    if (
+      typeof navigator === 'undefined'
+      || !navigator.permissions
+      || typeof navigator.permissions.query !== 'function'
+    ) {
+      return () => {};
+    }
+
+    let disposed = false;
+    let statusRef = null;
+    let onChange = null;
+
+    const syncPermission = async () => {
+      try {
+        const status = await navigator.permissions.query({ name: 'microphone' });
+        if (disposed) {
+          return;
+        }
+
+        statusRef = status;
+        onChange = () => {
+          if (!disposed) {
+            setMicrophonePermission(status.state || 'unknown');
+          }
+        };
+        onChange();
+        status.addEventListener?.('change', onChange);
+      } catch {
+        setMicrophonePermission('unknown');
+      }
+    };
+
+    void syncPermission();
+
+    return () => {
+      disposed = true;
+      if (statusRef && onChange) {
+        statusRef.removeEventListener?.('change', onChange);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!desktopMode) {
       return () => {};
     }
@@ -886,6 +1009,9 @@ export function useVoiceMicToggle({
   }, [clearAutoSubmitTimer, clearInterruptTimer]);
 
   const error = localError || lastError || vadError || playbackError || '';
+  const microphonePermissionDenied =
+    microphonePermission === 'denied'
+    || isMicrophonePermissionDeniedReason(error);
 
   return useMemo(
     () => ({
@@ -899,6 +1025,8 @@ export function useVoiceMicToggle({
       sessionId,
       status,
       capturedFrames,
+      microphonePermission,
+      microphonePermissionDenied,
       error,
       enableVoice,
       disableVoice,
@@ -918,6 +1046,8 @@ export function useVoiceMicToggle({
       isTransitioning,
       isVadLoading,
       isVadSpeaking,
+      microphonePermission,
+      microphonePermissionDenied,
       normalizedHotkey,
       sessionId,
       status,

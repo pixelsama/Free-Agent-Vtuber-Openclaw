@@ -9,6 +9,7 @@ const {
   globalShortcut,
   desktopCapturer,
   session,
+  systemPreferences,
 } = require('electron');
 
 const { registerChatStreamIpc } = require('./ipc/chatStream');
@@ -288,6 +289,100 @@ function registerDisplayMediaHandler() {
   });
 }
 
+function isTrustedMediaOrigin(origin = '') {
+  const normalizedOrigin = typeof origin === 'string' ? origin.trim() : '';
+  if (!normalizedOrigin) {
+    return false;
+  }
+
+  if (normalizedOrigin.startsWith('file://')) {
+    return true;
+  }
+
+  try {
+    const parsedOrigin = new URL(normalizedOrigin);
+    const devOrigin = new URL(getRendererDevUrl());
+    if (parsedOrigin.origin === devOrigin.origin || parsedOrigin.href.startsWith(devOrigin.origin)) {
+      return true;
+    }
+  } catch {
+    // noop
+  }
+
+  return false;
+}
+
+function registerMediaPermissionHandlers() {
+  const defaultSession = session.defaultSession;
+  if (!defaultSession) {
+    return;
+  }
+
+  if (typeof defaultSession.setPermissionCheckHandler === 'function') {
+    defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details = {}) => {
+      if (permission !== 'media') {
+        return false;
+      }
+
+      const currentUrl = typeof webContents?.getURL === 'function' ? webContents.getURL() : '';
+      if (!isTrustedMediaOrigin(requestingOrigin) && !isTrustedMediaOrigin(currentUrl)) {
+        return false;
+      }
+
+      const mediaType = typeof details.mediaType === 'string' ? details.mediaType : '';
+      const mediaTypes = Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
+      // Some Electron builds provide empty mediaType/mediaTypes for permission preflight.
+      return !mediaType && mediaTypes.length === 0
+        ? true
+        : mediaType === 'audio' || mediaTypes.includes('audio');
+    });
+  }
+
+  if (typeof defaultSession.setPermissionRequestHandler === 'function') {
+    defaultSession.setPermissionRequestHandler((webContents, permission, callback, details = {}) => {
+      if (permission !== 'media') {
+        callback(false);
+        return;
+      }
+
+      const requestingOrigin =
+        typeof details.requestingOrigin === 'string'
+          ? details.requestingOrigin
+          : typeof webContents?.getURL === 'function'
+            ? webContents.getURL()
+            : '';
+      const currentUrl = typeof webContents?.getURL === 'function' ? webContents.getURL() : '';
+      if (!isTrustedMediaOrigin(requestingOrigin) && !isTrustedMediaOrigin(currentUrl)) {
+        callback(false);
+        return;
+      }
+
+      const mediaType = typeof details.mediaType === 'string' ? details.mediaType : '';
+      const mediaTypes = Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
+      const hasAudioRequest = mediaType === 'audio' || mediaTypes.includes('audio');
+      const isPreflight = !mediaType && mediaTypes.length === 0;
+      if (!hasAudioRequest && !isPreflight) {
+        callback(false);
+        return;
+      }
+
+      if (process.platform !== 'darwin' || typeof systemPreferences?.askForMediaAccess !== 'function') {
+        callback(true);
+        return;
+      }
+
+      Promise.resolve(systemPreferences.askForMediaAccess('microphone'))
+        .then((granted) => {
+          callback(Boolean(granted));
+        })
+        .catch((error) => {
+          console.warn('Failed to ask microphone media access:', error);
+          callback(false);
+        });
+    });
+  }
+}
+
 function registerModelProtocol() {
   protocol.handle(MODEL_PROTOCOL, async (request) => {
     try {
@@ -406,6 +501,7 @@ async function bootstrap() {
   });
   registerModelProtocol();
   registerDisplayMediaHandler();
+  registerMediaPermissionHandlers();
 
   registerSettingsIpc({
     ipcMain,

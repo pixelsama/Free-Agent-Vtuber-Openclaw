@@ -22,6 +22,8 @@ export default function MainShell({
   onWindowControl,
   showChatPanel = false,
   onOpenChatPanel,
+  showVoicePermissionWarning = false,
+  voicePermissionWarningText = '',
 }) {
   const { t } = useI18n();
   const stageClassName = ['live2d-stage', 'window-mode', desktopMode ? `platform-${platform}` : '']
@@ -91,6 +93,10 @@ export default function MainShell({
           <ChatIcon />
         </IconButton>
       </Box>
+
+      {showVoicePermissionWarning && voicePermissionWarningText ? (
+        <Box className="window-voice-warning">{voicePermissionWarningText}</Box>
+      ) : null}
 
       <SubtitleBar text={subtitleText} />
     </Box>

@@ -117,6 +117,93 @@ body,
   pointer-events: auto;
 }
 
+.live2d-stage.pet-mode .pet-capture-preview {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(52px, 12%, 96px);
+  width: clamp(180px, 56%, 260px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid var(--floating-button-border);
+  background: var(--floating-button-bg-strong);
+  box-shadow: var(--floating-button-shadow);
+  backdrop-filter: blur(10px) saturate(130%);
+  -webkit-backdrop-filter: blur(10px) saturate(130%);
+  transform: translateX(-50%);
+  z-index: 9;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.live2d-stage.pet-mode .pet-capture-preview-image,
+.live2d-stage.pet-mode .pet-capture-preview-placeholder {
+  width: 50px;
+  height: 50px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.live2d-stage.pet-mode .pet-capture-preview-image {
+  object-fit: cover;
+  border: 1px solid rgba(31, 76, 144, 0.2);
+}
+
+.live2d-stage.pet-mode .pet-capture-preview-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px dashed rgba(31, 76, 144, 0.28);
+}
+
+.live2d-stage.pet-mode .pet-capture-preview-meta {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.live2d-stage.pet-mode .pet-capture-preview-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(19, 35, 58, 0.9);
+}
+
+.live2d-stage.pet-mode .pet-capture-preview-name {
+  font-size: 11px;
+  color: rgba(31, 56, 92, 0.74);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live2d-stage.pet-mode .pet-capture-preview-remove {
+  flex-shrink: 0;
+}
+
+.live2d-stage.pet-mode .pet-voice-warning {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(6px, 2%, 18px);
+  width: clamp(220px, 82%, 360px);
+  transform: translateX(-50%);
+  z-index: 9;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(176, 51, 45, 0.38);
+  background: rgba(255, 236, 231, 0.94);
+  color: #6b1f1a;
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+
 .live2d-stage.window-mode .live2d-hitbox {
   top: 44px;
   height: calc(100% - 44px);
@@ -147,6 +234,22 @@ body,
   z-index: 24;
   pointer-events: auto;
   -webkit-app-region: no-drag;
+}
+
+.window-voice-warning {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 24px;
+  z-index: 24;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(176, 51, 45, 0.38);
+  background: rgba(255, 236, 231, 0.94);
+  color: #6b1f1a;
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
 }
 
 .text-toggle {
@@ -198,4 +301,24 @@ body,
   background: var(--floating-button-active-bg) !important;
   box-shadow: var(--floating-button-shadow-active) !important;
   transform: translateY(0);
+}
+
+:root[data-theme-mode='dark'] .live2d-stage.pet-mode .pet-capture-preview-title {
+  color: rgba(227, 236, 252, 0.9);
+}
+
+:root[data-theme-mode='dark'] .live2d-stage.pet-mode .pet-capture-preview-name {
+  color: rgba(188, 207, 242, 0.78);
+}
+
+:root[data-theme-mode='dark'] .live2d-stage.pet-mode .pet-capture-preview-placeholder {
+  background: rgba(19, 34, 54, 0.78);
+  border-color: rgba(128, 168, 242, 0.38);
+}
+
+:root[data-theme-mode='dark'] .window-voice-warning,
+:root[data-theme-mode='dark'] .live2d-stage.pet-mode .pet-voice-warning {
+  border-color: rgba(255, 151, 140, 0.45);
+  background: rgba(74, 23, 20, 0.88);
+  color: rgba(255, 219, 213, 0.94);
 }
