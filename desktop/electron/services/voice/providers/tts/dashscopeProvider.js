@@ -39,6 +39,21 @@ function resolveDashScopeTtsModelProfile(model) {
       defaultVoice: DEFAULT_COSYVOICE_VOICE,
       defaultResponseFormat: 'pcm',
       defaultSpeechRate: 1,
+      supportsLanguageType: false,
+      supportsSpeechRate: true,
+    };
+  }
+
+  if (normalizedModel.startsWith('qwen-tts-realtime')) {
+    return {
+      family: 'qwen-realtime',
+      model: normalizedModel,
+      defaultSampleRate: DEFAULT_TTS_SAMPLE_RATE,
+      defaultVoice: DEFAULT_TTS_VOICE,
+      defaultResponseFormat: DEFAULT_TTS_RESPONSE_FORMAT,
+      defaultSpeechRate: 1,
+      supportsLanguageType: false,
+      supportsSpeechRate: false,
     };
   }
 
@@ -49,6 +64,8 @@ function resolveDashScopeTtsModelProfile(model) {
     defaultVoice: DEFAULT_TTS_VOICE,
     defaultResponseFormat: DEFAULT_TTS_RESPONSE_FORMAT,
     defaultSpeechRate: 1,
+    supportsLanguageType: true,
+    supportsSpeechRate: true,
   };
 }
 
@@ -694,11 +711,15 @@ function createDashScopeTtsProvider({ options = {}, WebSocketImpl = null } = {})
       const model = sanitizeText(options.model, DEFAULT_TTS_MODEL);
       const profile = resolveDashScopeTtsModelProfile(model);
       const voice = sanitizeText(options.voice, profile.defaultVoice);
-      const language = sanitizeText(options.language, DEFAULT_TTS_LANGUAGE);
+      const language = profile.supportsLanguageType
+        ? sanitizeText(options.language, DEFAULT_TTS_LANGUAGE)
+        : '';
       const workspace = sanitizeText(options.workspace);
       const responseFormat = sanitizeText(options.responseFormat, profile.defaultResponseFormat).toLowerCase();
-      const sampleRate = toPositiveInteger(options.sampleRate, profile.defaultSampleRate);
-      const speechRate = toFiniteNumber(options.speechRate, profile.defaultSpeechRate);
+      const inputSampleRate = toPositiveInteger(options.sampleRate, profile.defaultSampleRate);
+      const sampleRate = profile.supportsSpeechRate ? inputSampleRate : profile.defaultSampleRate;
+      const inputSpeechRate = toFiniteNumber(options.speechRate, profile.defaultSpeechRate);
+      const speechRate = profile.supportsSpeechRate ? inputSpeechRate : profile.defaultSpeechRate;
       const instructions = sanitizeText(options.instructions);
       const optimizeInstructions = toBooleanFlag(options.optimizeInstructions, false);
       const timeoutMs = Math.max(
