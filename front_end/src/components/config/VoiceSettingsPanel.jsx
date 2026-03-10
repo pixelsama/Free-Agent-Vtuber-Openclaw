@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -7,6 +10,7 @@ import {
   Stack,
   TextField,
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useI18n } from '../../i18n/I18nContext.jsx';
 import { desktopBridge } from '../../services/desktopBridge.js';
 
@@ -303,6 +307,28 @@ function extendOptionsWithCustom(options = [], currentValue = '') {
     return options;
   }
   return [{ value, label: `${value}（自定义）` }, ...options];
+}
+
+function VoiceSectionAccordion({
+  title = '',
+  defaultExpanded = false,
+  children,
+}) {
+  return (
+    <Accordion
+      defaultExpanded={defaultExpanded}
+      disableGutters
+      elevation={0}
+      sx={{ border: 1, borderColor: 'divider', borderRadius: 1, '&::before': { display: 'none' } }}
+    >
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Box sx={{ fontWeight: 600 }}>{title}</Box>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack spacing={1.5}>{children}</Stack>
+      </AccordionDetails>
+    </Accordion>
+  );
 }
 
 const defaultVoiceProviderSettings = {
@@ -1474,11 +1500,9 @@ export default function VoiceSettingsPanel({
       {!desktopMode && <Alert severity="warning">{t('voice.desktopOnly')}</Alert>}
 
       {desktopMode && (
-        <Stack spacing={1.5} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
-          <Box sx={{ fontWeight: 600 }}>语音模型清单（本地 + 云端）</Box>
+        <VoiceSectionAccordion title="语音模型清单（本地 + 云端）" defaultExpanded>
           <Stack spacing={1.5}>
-            <Stack spacing={1}>
-              <Box sx={{ fontWeight: 600 }}>ASR</Box>
+            <VoiceSectionAccordion title="ASR" defaultExpanded>
               <TextField
                 select
                 label="ASR 模型列表"
@@ -1614,10 +1638,9 @@ export default function VoiceSettingsPanel({
                   )}
                 </Stack>
               )}
-            </Stack>
+            </VoiceSectionAccordion>
 
-            <Stack spacing={1}>
-              <Box sx={{ fontWeight: 600 }}>TTS</Box>
+            <VoiceSectionAccordion title="TTS" defaultExpanded>
               <TextField
                 select
                 label="TTS 模型列表"
@@ -1811,7 +1834,7 @@ export default function VoiceSettingsPanel({
                   )}
                 </Stack>
               )}
-            </Stack>
+            </VoiceSectionAccordion>
 
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
               <Button
@@ -1834,12 +1857,11 @@ export default function VoiceSettingsPanel({
           {!!voiceProviderError && <Alert severity="warning">{voiceProviderError}</Alert>}
           {!!modelError && <Alert severity="warning">{modelError}</Alert>}
           {!!modelFeedback && <Alert severity="success">{modelFeedback}</Alert>}
-        </Stack>
+        </VoiceSectionAccordion>
       )}
 
       {desktopMode && (
-        <Stack spacing={1.5} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
-          <Box sx={{ fontWeight: 600 }}>语音延迟测试（当前生效模型）</Box>
+        <VoiceSectionAccordion title="语音延迟测试（当前生效模型）">
           <Alert severity="info">
             ASR 测试会请求麦克风并录音 3 秒，请点击后朗读你设置的提示词。
           </Alert>
@@ -1893,7 +1915,7 @@ export default function VoiceSettingsPanel({
           </Button>
 
           {!!voiceTestError && <Alert severity="warning">{voiceTestError}</Alert>}
-        </Stack>
+        </VoiceSectionAccordion>
       )}
     </Stack>
   );

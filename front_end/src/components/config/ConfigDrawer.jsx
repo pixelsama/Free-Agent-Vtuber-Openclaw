@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -14,6 +17,7 @@ import {
   TextField,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Live2DControls from '../controls/Live2DControls.jsx';
 import VoiceSettingsPanel from './VoiceSettingsPanel.jsx';
 import {
@@ -66,6 +70,28 @@ function normalizeMaskedSecretInput(rawValue, hasSavedSecret) {
   }
 
   return value;
+}
+
+function SectionAccordion({
+  title = '',
+  defaultExpanded = false,
+  children,
+}) {
+  return (
+    <Accordion
+      defaultExpanded={defaultExpanded}
+      disableGutters
+      elevation={0}
+      sx={{ border: 1, borderColor: 'divider', borderRadius: 1, '&::before': { display: 'none' } }}
+    >
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Box sx={{ fontWeight: 600 }}>{title}</Box>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack spacing={1.5}>{children}</Stack>
+      </AccordionDetails>
+    </Accordion>
+  );
 }
 
 export default function ConfigDrawer({
@@ -206,418 +232,419 @@ export default function ConfigDrawer({
             )}
 
             {activeConfigTab === 1 && (
-              <Stack spacing={2}>
+              <Stack spacing={1.5}>
                 {!desktopMode && <Alert severity="warning">{t('app.webModeWarning')}</Alert>}
 
                 {desktopMode && !hasSecureStorage && (
                   <Alert severity="warning">{t('app.keychainWarning')}</Alert>
                 )}
 
-                <TextField
-                  select
-                  label={t('app.chatBackendSelector')}
-                  value={selectedBackend}
-                  onChange={(event) => onChatBackendChange?.(event.target.value)}
-                  fullWidth
-                >
-                  <MenuItem value="openclaw">{t('app.backend.openclaw')}</MenuItem>
-                  <MenuItem value="nanobot">{t('app.backend.nanobot')}</MenuItem>
-                </TextField>
+                <SectionAccordion title={t('app.chatBackendSelector')} defaultExpanded>
+                  <TextField
+                    select
+                    label={t('app.chatBackendSelector')}
+                    value={selectedBackend}
+                    onChange={(event) => onChatBackendChange?.(event.target.value)}
+                    fullWidth
+                  >
+                    <MenuItem value="openclaw">{t('app.backend.openclaw')}</MenuItem>
+                    <MenuItem value="nanobot">{t('app.backend.nanobot')}</MenuItem>
+                  </TextField>
 
-                {selectedBackend === 'openclaw' && (
-                  <>
-                    <TextField
-                      label="OpenClaw Base URL"
-                      value={openClawSettings.baseUrl || ''}
-                      onChange={(event) => onOpenClawSettingChange?.('baseUrl', event.target.value)}
-                      placeholder="http://127.0.0.1:18789"
-                      fullWidth
-                    />
-
-                    <TextField
-                      label="OpenClaw Token"
-                      value={openClawTokenValue}
-                      onChange={(event) => {
-                        const nextToken = normalizeMaskedSecretInput(event.target.value, openClawTokenSaved);
-                        onOpenClawSettingChange?.('token', nextToken);
-                      }}
-                      type="password"
-                      autoComplete="off"
-                      placeholder={openClawSettings.hasToken ? t('app.tokenSavedPlaceholder') : ''}
-                      helperText={openClawTokenSaved ? t('app.tokenSavedPlaceholder') : ''}
-                      fullWidth
-                    />
-
-                    <TextField
-                      label="OpenClaw Agent ID"
-                      value={openClawSettings.agentId || ''}
-                      onChange={(event) => onOpenClawSettingChange?.('agentId', event.target.value)}
-                      placeholder="main"
-                      fullWidth
-                    />
-                  </>
-                )}
-
-                {selectedBackend === 'nanobot' && (
-                  <>
-                    {desktopMode && !nanobotRuntimeInstalled && (
-                      <Alert
-                        severity="warning"
-                        action={(
-                          <Button
-                            color="inherit"
-                            size="small"
-                            disabled={nanobotRuntimeInstalling}
-                            onClick={onInstallNanobotRuntime}
-                          >
-                            {nanobotRuntimeInstalling ? t('app.nanobotRuntimeInstalling') : t('app.nanobotRuntimeInstall')}
-                          </Button>
-                        )}
-                      >
-                        {t('app.nanobotRuntimeMissing')}
-                      </Alert>
-                    )}
-
-                    {desktopMode && nanobotRuntimeInstalled && (
-                      <Alert severity="success">
-                        {t('app.nanobotRuntimeReady', { path: nanobotRuntimePath })}
-                      </Alert>
-                    )}
-
-                    {desktopMode && (
-                      <Stack spacing={1}>
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                          }}
-                        >
-                          <Box component="span" sx={{ fontSize: 14, fontWeight: 600 }}>
-                            {t('app.nanobotDebugLogs')}
-                          </Box>
-                          <Button
-                            size="small"
-                            onClick={() => onClearNanobotDebugLogs?.()}
-                            disabled={!nanobotDebugLogs.length}
-                          >
-                            {t('app.clearNanobotDebugLogs')}
-                          </Button>
-                        </Box>
-                        <Box
-                          component="pre"
-                          sx={{
-                            m: 0,
-                            p: 1.5,
-                            minHeight: 160,
-                            maxHeight: 260,
-                            overflow: 'auto',
-                            borderRadius: 1,
-                            bgcolor: 'action.hover',
-                            color: 'text.primary',
-                            fontSize: 12,
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word',
-                          }}
-                        >
-                          {nanobotDebugLogs.length
-                            ? nanobotDebugLogs.map((entry) => formatNanobotDebugLog(entry)).join('\n\n')
-                            : t('app.nanobotDebugLogsEmpty')}
-                        </Box>
-                      </Stack>
-                    )}
-
-                    <TextField
-                      select
-                      label={t('app.nanobotEnabled')}
-                      value={nanobotSettings.enabled ? 'true' : 'false'}
-                      onChange={(event) => onNanobotSettingChange?.('enabled', event.target.value === 'true')}
-                      fullWidth
-                    >
-                      <MenuItem value="true">{t('common.enabled')}</MenuItem>
-                      <MenuItem value="false">{t('common.disabled')}</MenuItem>
-                    </TextField>
-
-                    <Stack spacing={1}>
+                  {selectedBackend === 'openclaw' && (
+                    <>
                       <TextField
-                        label={t('app.nanobotWorkspace')}
-                        value={nanobotSettings.workspace || ''}
-                        helperText={t('app.nanobotWorkspaceHelper')}
-                        InputProps={{
-                          readOnly: true,
-                        }}
+                        label="OpenClaw Base URL"
+                        value={openClawSettings.baseUrl || ''}
+                        onChange={(event) => onOpenClawSettingChange?.('baseUrl', event.target.value)}
+                        placeholder="http://127.0.0.1:18789"
                         fullWidth
                       />
-                      <Button
-                        variant="outlined"
-                        onClick={() => {
-                          void onPickNanobotWorkspace?.();
-                        }}
-                        disabled={!desktopMode || settingsSaving || settingsTesting}
-                      >
-                        {t('app.nanobotWorkspaceBrowse')}
-                      </Button>
-                    </Stack>
 
-                    <Stack spacing={1}>
-                      <Box component="span" sx={{ fontSize: 14, fontWeight: 600 }}>
-                        {t('app.nanobotSkillsTitle')}
-                      </Box>
-                      <Alert severity="info">{t('app.nanobotSkillsHelper')}</Alert>
-                      <Stack direction="row" spacing={1}>
+                      <TextField
+                        label="OpenClaw Token"
+                        value={openClawTokenValue}
+                        onChange={(event) => {
+                          const nextToken = normalizeMaskedSecretInput(event.target.value, openClawTokenSaved);
+                          onOpenClawSettingChange?.('token', nextToken);
+                        }}
+                        type="password"
+                        autoComplete="off"
+                        placeholder={openClawSettings.hasToken ? t('app.tokenSavedPlaceholder') : ''}
+                        helperText={openClawTokenSaved ? t('app.tokenSavedPlaceholder') : ''}
+                        fullWidth
+                      />
+
+                      <TextField
+                        label="OpenClaw Agent ID"
+                        value={openClawSettings.agentId || ''}
+                        onChange={(event) => onOpenClawSettingChange?.('agentId', event.target.value)}
+                        placeholder="main"
+                        fullWidth
+                      />
+                    </>
+                  )}
+
+                  {selectedBackend === 'nanobot' && (
+                    <>
+                      {desktopMode && !nanobotRuntimeInstalled && (
+                        <Alert
+                          severity="warning"
+                          action={(
+                            <Button
+                              color="inherit"
+                              size="small"
+                              disabled={nanobotRuntimeInstalling}
+                              onClick={onInstallNanobotRuntime}
+                            >
+                              {nanobotRuntimeInstalling ? t('app.nanobotRuntimeInstalling') : t('app.nanobotRuntimeInstall')}
+                            </Button>
+                          )}
+                        >
+                          {t('app.nanobotRuntimeMissing')}
+                        </Alert>
+                      )}
+
+                      {desktopMode && nanobotRuntimeInstalled && (
+                        <Alert severity="success">
+                          {t('app.nanobotRuntimeReady', { path: nanobotRuntimePath })}
+                        </Alert>
+                      )}
+
+                      <TextField
+                        select
+                        label={t('app.nanobotEnabled')}
+                        value={nanobotSettings.enabled ? 'true' : 'false'}
+                        onChange={(event) => onNanobotSettingChange?.('enabled', event.target.value === 'true')}
+                        fullWidth
+                      >
+                        <MenuItem value="true">{t('common.enabled')}</MenuItem>
+                        <MenuItem value="false">{t('common.disabled')}</MenuItem>
+                      </TextField>
+
+                      <Stack spacing={1}>
+                        <TextField
+                          label={t('app.nanobotWorkspace')}
+                          value={nanobotSettings.workspace || ''}
+                          helperText={t('app.nanobotWorkspaceHelper')}
+                          InputProps={{
+                            readOnly: true,
+                          }}
+                          fullWidth
+                        />
                         <Button
                           variant="outlined"
                           onClick={() => {
-                            void onImportNanobotSkillsZip?.();
-                          }}
-                          disabled={!desktopMode || settingsSaving || settingsTesting || nanobotSkillsImporting}
-                        >
-                          {nanobotSkillsImporting ? t('app.nanobotSkillsImporting') : t('app.nanobotSkillsImportZip')}
-                        </Button>
-                        <Button
-                          variant="text"
-                          onClick={() => {
-                            void onOpenNanobotSkillsLibrary?.();
+                            void onPickNanobotWorkspace?.();
                           }}
                           disabled={!desktopMode || settingsSaving || settingsTesting}
                         >
-                          {t('app.nanobotSkillsOpenLibrary')}
+                          {t('app.nanobotWorkspaceBrowse')}
                         </Button>
                       </Stack>
-                      {nanobotSkillsLoading ? (
-                        <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
-                          {t('app.nanobotSkillsLoading')}
-                        </Box>
-                      ) : (
-                        <Stack spacing={1}>
-                          <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
-                            {t('app.nanobotSkillsInstalled')}
-                          </Box>
-                          <Box
-                            sx={{
-                              p: 1.25,
-                              borderRadius: 1,
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              bgcolor: 'background.paper',
-                            }}
-                          >
-                            {customNanobotSkills.length ? (
-                              <Stack spacing={1}>
-                                {customNanobotSkills.map((skill) => {
-                                  const skillName = skill.skillName || skill.name || '';
-                                  const skillDescription = skill.description || t('app.nanobotSkillsNoDescription');
-                                  return (
-                                    <Stack
-                                      key={`custom-skill-${skillName}`}
-                                      direction="row"
-                                      spacing={1}
-                                      alignItems="center"
-                                      justifyContent="space-between"
-                                    >
-                                      <Box sx={{ minWidth: 0 }}>
-                                        <Box sx={{ fontSize: 14, fontWeight: 600, wordBreak: 'break-word' }}>
-                                          {skill.name || skillName}
-                                        </Box>
-                                        <Box sx={{ color: 'text.secondary', fontSize: 12, wordBreak: 'break-word' }}>
-                                          {skillDescription}
-                                        </Box>
-                                      </Box>
-                                      <Button
-                                        color="warning"
-                                        size="small"
-                                        disabled={
-                                          !desktopMode
-                                          || settingsSaving
-                                          || settingsTesting
-                                          || !skillName
-                                          || nanobotSkillsDeletingName === skillName
-                                        }
-                                        onClick={() => {
-                                          if (!skillName) {
-                                            return;
-                                          }
-                                          const confirmed =
-                                            typeof window === 'undefined'
-                                              ? true
-                                              : window.confirm(t('app.nanobotSkillsDeleteConfirm', { name: skillName }));
-                                          if (!confirmed) {
-                                            return;
-                                          }
-                                          void onDeleteNanobotSkill?.(skillName);
-                                        }}
-                                      >
-                                        {nanobotSkillsDeletingName === skillName
-                                          ? t('app.nanobotSkillsDeleting')
-                                          : t('common.delete')}
-                                      </Button>
-                                    </Stack>
-                                  );
-                                })}
-                              </Stack>
-                            ) : (
-                              <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
-                                {t('app.nanobotSkillsEmpty')}
-                              </Box>
-                            )}
-                          </Box>
 
-                          <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
-                            {t('app.nanobotSkillsBuiltin')}
-                          </Box>
-                          <Box
-                            sx={{
-                              p: 1.25,
-                              borderRadius: 1,
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              bgcolor: 'background.paper',
-                            }}
-                          >
-                            {builtinNanobotSkills.length ? (
-                              <Stack spacing={1}>
-                                {builtinNanobotSkills.map((skill) => (
-                                  <Box key={`builtin-skill-${skill.skillName || skill.name}`}>
-                                    <Box sx={{ fontSize: 14, fontWeight: 600, wordBreak: 'break-word' }}>
-                                      {skill.name || skill.skillName}
-                                    </Box>
-                                    <Box sx={{ color: 'text.secondary', fontSize: 12, wordBreak: 'break-word' }}>
-                                      {skill.description || t('app.nanobotSkillsNoDescription')}
-                                    </Box>
-                                  </Box>
-                                ))}
-                              </Stack>
-                            ) : (
-                              <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
-                                {t('app.nanobotSkillsBuiltinEmpty')}
-                              </Box>
-                            )}
-                          </Box>
-                        </Stack>
-                      )}
-                    </Stack>
+                      <Alert severity={nanobotSettings.allowHighRiskTools ? 'warning' : 'info'}>
+                        {t('app.nanobotPermissionsWarning')}
+                      </Alert>
 
-                    <Alert severity={nanobotSettings.allowHighRiskTools ? 'warning' : 'info'}>
-                      {t('app.nanobotPermissionsWarning')}
-                    </Alert>
-
-                    <TextField
-                      select
-                      label={t('app.nanobotAllowHighRiskTools')}
-                      value={nanobotSettings.allowHighRiskTools ? 'true' : 'false'}
-                      onChange={(event) => onNanobotSettingChange?.('allowHighRiskTools', event.target.value === 'true')}
-                      helperText={t('app.nanobotAllowHighRiskToolsHelper')}
-                      fullWidth
-                    >
-                      <MenuItem value="false">{t('common.disabled')}</MenuItem>
-                      <MenuItem value="true">{t('common.enabled')}</MenuItem>
-                    </TextField>
-
-                    <TextField
-                      label={t('app.nanobotProvider')}
-                      value={nanobotSettings.provider || ''}
-                      onChange={(event) => onNanobotSettingChange?.('provider', event.target.value)}
-                      placeholder="openrouter"
-                      fullWidth
-                    />
-
-                    <TextField
-                      label={t('app.nanobotModel')}
-                      value={nanobotSettings.model || ''}
-                      onChange={(event) => onNanobotSettingChange?.('model', event.target.value)}
-                      placeholder="anthropic/claude-opus-4-5"
-                      fullWidth
-                    />
-
-                    <TextField
-                      label={t('app.nanobotApiBase')}
-                      value={nanobotSettings.apiBase || ''}
-                      onChange={(event) => onNanobotSettingChange?.('apiBase', event.target.value)}
-                      placeholder="https://openrouter.ai/api/v1"
-                      fullWidth
-                    />
-
-                    <TextField
-                      label={t('app.nanobotApiKey')}
-                      value={nanobotApiKeyValue}
-                      onChange={(event) => {
-                        const nextApiKey = normalizeMaskedSecretInput(event.target.value, nanobotApiKeySaved);
-                        onNanobotSettingChange?.('apiKey', nextApiKey);
-                      }}
-                      type="password"
-                      autoComplete="off"
-                      placeholder={nanobotSettings.hasApiKey ? t('app.tokenSavedPlaceholder') : ''}
-                      helperText={nanobotApiKeySaved ? t('app.tokenSavedPlaceholder') : ''}
-                      fullWidth
-                    />
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: -0.5 }}>
-                      <Button
-                        size="small"
-                        color="warning"
-                        onClick={onClearSavedToken}
-                        disabled={settingsSaving || settingsTesting || !nanobotSettings.hasApiKey}
+                      <TextField
+                        select
+                        label={t('app.nanobotAllowHighRiskTools')}
+                        value={nanobotSettings.allowHighRiskTools ? 'true' : 'false'}
+                        onChange={(event) => onNanobotSettingChange?.('allowHighRiskTools', event.target.value === 'true')}
+                        helperText={t('app.nanobotAllowHighRiskToolsHelper')}
+                        fullWidth
                       >
-                        {t('app.nanobotClearApiKey')}
-                      </Button>
-                    </Box>
+                        <MenuItem value="false">{t('common.disabled')}</MenuItem>
+                        <MenuItem value="true">{t('common.enabled')}</MenuItem>
+                      </TextField>
 
+                      <TextField
+                        label={t('app.nanobotProvider')}
+                        value={nanobotSettings.provider || ''}
+                        onChange={(event) => onNanobotSettingChange?.('provider', event.target.value)}
+                        placeholder="openrouter"
+                        fullWidth
+                      />
+
+                      <TextField
+                        label={t('app.nanobotModel')}
+                        value={nanobotSettings.model || ''}
+                        onChange={(event) => onNanobotSettingChange?.('model', event.target.value)}
+                        placeholder="anthropic/claude-opus-4-5"
+                        fullWidth
+                      />
+
+                      <TextField
+                        label={t('app.nanobotApiBase')}
+                        value={nanobotSettings.apiBase || ''}
+                        onChange={(event) => onNanobotSettingChange?.('apiBase', event.target.value)}
+                        placeholder="https://openrouter.ai/api/v1"
+                        fullWidth
+                      />
+
+                      <TextField
+                        label={t('app.nanobotApiKey')}
+                        value={nanobotApiKeyValue}
+                        onChange={(event) => {
+                          const nextApiKey = normalizeMaskedSecretInput(event.target.value, nanobotApiKeySaved);
+                          onNanobotSettingChange?.('apiKey', nextApiKey);
+                        }}
+                        type="password"
+                        autoComplete="off"
+                        placeholder={nanobotSettings.hasApiKey ? t('app.tokenSavedPlaceholder') : ''}
+                        helperText={nanobotApiKeySaved ? t('app.tokenSavedPlaceholder') : ''}
+                        fullWidth
+                      />
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: -0.5 }}>
+                        <Button
+                          size="small"
+                          color="warning"
+                          onClick={onClearSavedToken}
+                          disabled={settingsSaving || settingsTesting || !nanobotSettings.hasApiKey}
+                        >
+                          {t('app.nanobotClearApiKey')}
+                        </Button>
+                      </Box>
+
+                      <Stack direction="row" spacing={1}>
+                        <TextField
+                          label={t('app.nanobotMaxTokens')}
+                          type="number"
+                          value={nanobotSettings.maxTokens ?? 4096}
+                          onChange={(event) =>
+                            onNanobotSettingChange?.('maxTokens', Number.parseInt(event.target.value, 10) || 0)}
+                          fullWidth
+                        />
+                        <TextField
+                          label={t('app.nanobotTemperature')}
+                          type="number"
+                          value={nanobotSettings.temperature ?? 0.2}
+                          onChange={(event) =>
+                            onNanobotSettingChange?.('temperature', Number.parseFloat(event.target.value))}
+                          inputProps={{ step: 0.1 }}
+                          fullWidth
+                        />
+                      </Stack>
+
+                      <TextField
+                        select
+                        label={t('app.nanobotReasoningEffort')}
+                        value={nanobotSettings.reasoningEffort || ''}
+                        onChange={(event) => onNanobotSettingChange?.('reasoningEffort', event.target.value)}
+                        fullWidth
+                      >
+                        <MenuItem value="">{t('common.auto')}</MenuItem>
+                        <MenuItem value="low">low</MenuItem>
+                        <MenuItem value="medium">medium</MenuItem>
+                        <MenuItem value="high">high</MenuItem>
+                      </TextField>
+                    </>
+                  )}
+                </SectionAccordion>
+
+                {selectedBackend === 'nanobot' && (
+                  <SectionAccordion title={t('app.nanobotSkillsTitle')} defaultExpanded>
+                    <Alert severity="info">{t('app.nanobotSkillsHelper')}</Alert>
                     <Stack direction="row" spacing={1}>
-                      <TextField
-                        label={t('app.nanobotMaxTokens')}
-                        type="number"
-                        value={nanobotSettings.maxTokens ?? 4096}
-                        onChange={(event) =>
-                          onNanobotSettingChange?.('maxTokens', Number.parseInt(event.target.value, 10) || 0)
-                        }
-                        fullWidth
-                      />
-                      <TextField
-                        label={t('app.nanobotTemperature')}
-                        type="number"
-                        value={nanobotSettings.temperature ?? 0.2}
-                        onChange={(event) =>
-                          onNanobotSettingChange?.('temperature', Number.parseFloat(event.target.value))
-                        }
-                        inputProps={{ step: 0.1 }}
-                        fullWidth
-                      />
+                      <Button
+                        variant="outlined"
+                        onClick={() => {
+                          void onImportNanobotSkillsZip?.();
+                        }}
+                        disabled={!desktopMode || settingsSaving || settingsTesting || nanobotSkillsImporting}
+                      >
+                        {nanobotSkillsImporting ? t('app.nanobotSkillsImporting') : t('app.nanobotSkillsImportZip')}
+                      </Button>
+                      <Button
+                        variant="text"
+                        onClick={() => {
+                          void onOpenNanobotSkillsLibrary?.();
+                        }}
+                        disabled={!desktopMode || settingsSaving || settingsTesting}
+                      >
+                        {t('app.nanobotSkillsOpenLibrary')}
+                      </Button>
                     </Stack>
+                    {nanobotSkillsLoading ? (
+                      <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
+                        {t('app.nanobotSkillsLoading')}
+                      </Box>
+                    ) : (
+                      <Stack spacing={1}>
+                        <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
+                          {t('app.nanobotSkillsInstalled')}
+                        </Box>
+                        <Box
+                          sx={{
+                            p: 1.25,
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            bgcolor: 'background.paper',
+                          }}
+                        >
+                          {customNanobotSkills.length ? (
+                            <Stack spacing={1}>
+                              {customNanobotSkills.map((skill) => {
+                                const skillName = skill.skillName || skill.name || '';
+                                const skillDescription = skill.description || t('app.nanobotSkillsNoDescription');
+                                return (
+                                  <Stack
+                                    key={`custom-skill-${skillName}`}
+                                    direction="row"
+                                    spacing={1}
+                                    alignItems="center"
+                                    justifyContent="space-between"
+                                  >
+                                    <Box sx={{ minWidth: 0 }}>
+                                      <Box sx={{ fontSize: 14, fontWeight: 600, wordBreak: 'break-word' }}>
+                                        {skill.name || skillName}
+                                      </Box>
+                                      <Box sx={{ color: 'text.secondary', fontSize: 12, wordBreak: 'break-word' }}>
+                                        {skillDescription}
+                                      </Box>
+                                    </Box>
+                                    <Button
+                                      color="warning"
+                                      size="small"
+                                      disabled={
+                                        !desktopMode
+                                        || settingsSaving
+                                        || settingsTesting
+                                        || !skillName
+                                        || nanobotSkillsDeletingName === skillName
+                                      }
+                                      onClick={() => {
+                                        if (!skillName) {
+                                          return;
+                                        }
+                                        const confirmed =
+                                          typeof window === 'undefined'
+                                            ? true
+                                            : window.confirm(t('app.nanobotSkillsDeleteConfirm', { name: skillName }));
+                                        if (!confirmed) {
+                                          return;
+                                        }
+                                        void onDeleteNanobotSkill?.(skillName);
+                                      }}
+                                    >
+                                      {nanobotSkillsDeletingName === skillName
+                                        ? t('app.nanobotSkillsDeleting')
+                                        : t('common.delete')}
+                                    </Button>
+                                  </Stack>
+                                );
+                              })}
+                            </Stack>
+                          ) : (
+                            <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
+                              {t('app.nanobotSkillsEmpty')}
+                            </Box>
+                          )}
+                        </Box>
 
-                    <TextField
-                      select
-                      label={t('app.nanobotReasoningEffort')}
-                      value={nanobotSettings.reasoningEffort || ''}
-                      onChange={(event) => onNanobotSettingChange?.('reasoningEffort', event.target.value)}
-                      fullWidth
-                    >
-                      <MenuItem value="">{t('common.auto')}</MenuItem>
-                      <MenuItem value="low">low</MenuItem>
-                      <MenuItem value="medium">medium</MenuItem>
-                      <MenuItem value="high">high</MenuItem>
-                    </TextField>
-                  </>
+                        <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
+                          {t('app.nanobotSkillsBuiltin')}
+                        </Box>
+                        <Box
+                          sx={{
+                            p: 1.25,
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            bgcolor: 'background.paper',
+                          }}
+                        >
+                          {builtinNanobotSkills.length ? (
+                            <Stack spacing={1}>
+                              {builtinNanobotSkills.map((skill) => (
+                                <Box key={`builtin-skill-${skill.skillName || skill.name}`}>
+                                  <Box sx={{ fontSize: 14, fontWeight: 600, wordBreak: 'break-word' }}>
+                                    {skill.name || skill.skillName}
+                                  </Box>
+                                  <Box sx={{ color: 'text.secondary', fontSize: 12, wordBreak: 'break-word' }}>
+                                    {skill.description || t('app.nanobotSkillsNoDescription')}
+                                  </Box>
+                                </Box>
+                              ))}
+                            </Stack>
+                          ) : (
+                            <Box sx={{ color: 'text.secondary', fontSize: 13 }}>
+                              {t('app.nanobotSkillsBuiltinEmpty')}
+                            </Box>
+                          )}
+                        </Box>
+                      </Stack>
+                    )}
+                  </SectionAccordion>
                 )}
 
-                <Stack direction="row" spacing={1}>
-                  <Button
-                    variant="outlined"
-                    onClick={onTestChatBackendSettings}
-                    disabled={testButtonDisabled}
-                  >
-                    {settingsTesting ? t('app.testingConnection') : t('app.connectionTest')}
-                  </Button>
-                  <Button
-                    variant="text"
-                    color="warning"
-                    onClick={onClearSavedToken}
-                    disabled={settingsSaving || settingsTesting || !hasBackendSecret}
-                  >
-                    {t('app.clearToken')}
-                  </Button>
-                </Stack>
+                {selectedBackend === 'nanobot' && desktopMode && (
+                  <SectionAccordion title={t('app.nanobotDebugLogs')}>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Box component="span" sx={{ fontSize: 14, fontWeight: 600 }}>
+                        {t('app.nanobotDebugLogs')}
+                      </Box>
+                      <Button
+                        size="small"
+                        onClick={() => onClearNanobotDebugLogs?.()}
+                        disabled={!nanobotDebugLogs.length}
+                      >
+                        {t('app.clearNanobotDebugLogs')}
+                      </Button>
+                    </Box>
+                    <Box
+                      component="pre"
+                      sx={{
+                        m: 0,
+                        p: 1.5,
+                        minHeight: 160,
+                        maxHeight: 260,
+                        overflow: 'auto',
+                        borderRadius: 1,
+                        bgcolor: 'action.hover',
+                        color: 'text.primary',
+                        fontSize: 12,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {nanobotDebugLogs.length
+                        ? nanobotDebugLogs.map((entry) => formatNanobotDebugLog(entry)).join('\n\n')
+                        : t('app.nanobotDebugLogsEmpty')}
+                    </Box>
+                  </SectionAccordion>
+                )}
 
-                {settingsError && <Alert severity="error">{settingsError}</Alert>}
-                {settingsFeedback && <Alert severity="success">{settingsFeedback}</Alert>}
+                <SectionAccordion title={t('app.connectionTest')} defaultExpanded>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      variant="outlined"
+                      onClick={onTestChatBackendSettings}
+                      disabled={testButtonDisabled}
+                    >
+                      {settingsTesting ? t('app.testingConnection') : t('app.connectionTest')}
+                    </Button>
+                    <Button
+                      variant="text"
+                      color="warning"
+                      onClick={onClearSavedToken}
+                      disabled={settingsSaving || settingsTesting || !hasBackendSecret}
+                    >
+                      {t('app.clearToken')}
+                    </Button>
+                  </Stack>
+
+                  {settingsError && <Alert severity="error">{settingsError}</Alert>}
+                  {settingsFeedback && <Alert severity="success">{settingsFeedback}</Alert>}
+                </SectionAccordion>
               </Stack>
             )}
 
@@ -630,10 +657,8 @@ export default function ConfigDrawer({
             )}
 
             {activeConfigTab === 3 && (
-              <Stack spacing={2}>
-                <Box sx={{ fontWeight: 600 }}>{t('preferences.title')}</Box>
-                <Stack spacing={1}>
-                  <Box sx={{ color: 'text.secondary', fontSize: 14 }}>{t('preferences.language')}</Box>
+              <Stack spacing={1.5}>
+                <SectionAccordion title={t('preferences.language')} defaultExpanded>
                   <Stack direction="row" spacing={1}>
                     <Button
                       size="small"
@@ -650,9 +675,9 @@ export default function ConfigDrawer({
                       {t('language.en')}
                     </Button>
                   </Stack>
-                </Stack>
-                <Stack spacing={1}>
-                  <Box sx={{ color: 'text.secondary', fontSize: 14 }}>{t('preferences.theme')}</Box>
+                </SectionAccordion>
+
+                <SectionAccordion title={t('preferences.theme')} defaultExpanded>
                   <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                     <Button
                       size="small"
@@ -676,7 +701,7 @@ export default function ConfigDrawer({
                       {t('preferences.theme.system')}
                     </Button>
                   </Stack>
-                </Stack>
+                </SectionAccordion>
               </Stack>
             )}
           </Stack>
