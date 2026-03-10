@@ -14,6 +14,8 @@ const ASR_TEST_RECORD_MS = 3000;
 const ASR_TEST_SAMPLE_RATE = 16000;
 const VOICE_SETTINGS_AUTOSAVE_DEBOUNCE_MS = 500;
 const MASKED_SECRET_VALUE = '********';
+const CLOUD_ASR_DASHSCOPE_OPTION = 'cloud:dashscope:asr';
+const CLOUD_TTS_DASHSCOPE_OPTION = 'cloud:dashscope:tts';
 
 function clampToInt16(sample) {
   const clamped = Math.max(-1, Math.min(1, sample));
@@ -177,6 +179,34 @@ function resolveAsrModelPath(bundle = {}) {
 
 function resolveTtsModelPath(bundle = {}) {
   return bundle?.tts?.modelPath || bundle?.runtime?.ttsModelDir || '';
+}
+
+function resolveLocalModelShortLabel(item = {}, capability = 'asr') {
+  const joined = [
+    item?.id || '',
+    item?.name || '',
+    item?.description || '',
+    item?.runtime?.asrModelId || '',
+    item?.runtime?.ttsModelId || '',
+    item?.runtime?.ttsEngine || '',
+  ].join(' ').toLowerCase();
+
+  if (joined.includes('sherpa')) {
+    return 'sherpa-onnx';
+  }
+  if (capability === 'asr' && joined.includes('qwen3-asr')) {
+    return 'Qwen3-ASR';
+  }
+  if (capability === 'tts' && joined.includes('qwen3-tts')) {
+    return 'Qwen3-TTS';
+  }
+  if (capability === 'tts' && joined.includes('edge')) {
+    return 'Edge-TTS';
+  }
+
+  return capability === 'asr'
+    ? (item?.asrOptionLabel || item?.name || item?.id || '')
+    : (item?.ttsOptionLabel || item?.name || item?.id || '');
 }
 
 function normalizeMaskedSecretInput(rawValue, hasSavedSecret) {
@@ -519,6 +549,36 @@ export default function VoiceSettingsPanel({
     selectedAsrCatalogId && !hasInstalledSelectedAsrCatalog ? null : activeAsrBundle;
   const effectiveActiveTtsBundle =
     selectedTtsCatalogId && !hasInstalledSelectedTtsCatalog ? null : activeTtsBundle;
+  const asrModelOptions = useMemo(
+    () => [
+      { value: '', label: '跟随环境变量（自动）', source: 'inherit' },
+      ...asrCatalogItems.map((item) => ({
+        value: item.id,
+        label: `${resolveLocalModelShortLabel(item, 'asr')}（本地）`,
+        source: 'local',
+      })),
+      { value: CLOUD_ASR_DASHSCOPE_OPTION, label: '阿里百炼（云端）', source: 'cloud' },
+    ],
+    [asrCatalogItems],
+  );
+  const ttsModelOptions = useMemo(
+    () => [
+      { value: '', label: '跟随环境变量（自动）', source: 'inherit' },
+      ...ttsCatalogItems.map((item) => ({
+        value: item.id,
+        label: `${resolveLocalModelShortLabel(item, 'tts')}（本地）`,
+        source: 'local',
+      })),
+      { value: CLOUD_TTS_DASHSCOPE_OPTION, label: '阿里百炼（云端）', source: 'cloud' },
+    ],
+    [ttsCatalogItems],
+  );
+  const selectedAsrModelOptionValue = selectedAsrCatalogId
+    || (voiceProviderSettings.asrProvider === 'dashscope' ? CLOUD_ASR_DASHSCOPE_OPTION : '');
+  const selectedTtsModelOptionValue = selectedTtsCatalogId
+    || (voiceProviderSettings.ttsProvider === 'dashscope' ? CLOUD_TTS_DASHSCOPE_OPTION : '');
+  const isAsrCloudSelected = selectedAsrModelOptionValue === CLOUD_ASR_DASHSCOPE_OPTION;
+  const isTtsCloudSelected = selectedTtsModelOptionValue === CLOUD_TTS_DASHSCOPE_OPTION;
   const dashscopeActive = voiceProviderSettings.asrProvider === 'dashscope'
     || voiceProviderSettings.ttsProvider === 'dashscope';
   const dashscopeApiKeySaved = Boolean(
@@ -699,13 +759,37 @@ export default function VoiceSettingsPanel({
   }, [loadVoiceModels]);
 
   const handleChangeAsrCatalog = useCallback(async (nextCatalogId) => {
-    setSelectedAsrCatalogId(nextCatalogId);
     if (!desktopMode) {
       return;
     }
 
     setModelError('');
     setModelFeedback('');
+
+    if (nextCatalogId === CLOUD_ASR_DASHSCOPE_OPTION) {
+      setSelectedAsrCatalogId('');
+      updateVoiceProviderSetting('asrProvider', 'dashscope');
+      try {
+        const clearResult = await desktopBridge.voiceModels.select({ asrBundleId: '' });
+        if (!mountedRef.current) {
+          return;
+        }
+        if (!clearResult?.ok) {
+          setModelError(clearResult?.error?.message || '切换到阿里百炼 ASR 失败。');
+          return;
+        }
+        applyVoiceModelList(clearResult);
+        setModelFeedback('ASR 已切换到阿里百炼（云端）。');
+      } catch (error) {
+        if (mountedRef.current) {
+          setModelError(error?.message || '切换到阿里百炼 ASR 失败。');
+        }
+      }
+      return;
+    }
+
+    updateVoiceProviderSetting('asrProvider', 'inherit');
+    setSelectedAsrCatalogId(nextCatalogId);
 
     const asrBundleId = nextCatalogId
       ? modelBundles.find((bundle) => bundle.catalogId === nextCatalogId && bundleHasAsr(bundle))?.id || ''
@@ -749,16 +833,40 @@ export default function VoiceSettingsPanel({
         setModelError(error?.message || '切换 ASR 模型失败。');
       }
     }
-  }, [applyVoiceModelList, desktopMode, modelBundles]);
+  }, [applyVoiceModelList, desktopMode, modelBundles, updateVoiceProviderSetting]);
 
   const handleChangeTtsCatalog = useCallback(async (nextCatalogId) => {
-    setSelectedTtsCatalogId(nextCatalogId);
     if (!desktopMode) {
       return;
     }
 
     setModelError('');
     setModelFeedback('');
+
+    if (nextCatalogId === CLOUD_TTS_DASHSCOPE_OPTION) {
+      setSelectedTtsCatalogId('');
+      updateVoiceProviderSetting('ttsProvider', 'dashscope');
+      try {
+        const clearResult = await desktopBridge.voiceModels.select({ ttsBundleId: '' });
+        if (!mountedRef.current) {
+          return;
+        }
+        if (!clearResult?.ok) {
+          setModelError(clearResult?.error?.message || '切换到阿里百炼 TTS 失败。');
+          return;
+        }
+        applyVoiceModelList(clearResult);
+        setModelFeedback('TTS 已切换到阿里百炼（云端）。');
+      } catch (error) {
+        if (mountedRef.current) {
+          setModelError(error?.message || '切换到阿里百炼 TTS 失败。');
+        }
+      }
+      return;
+    }
+
+    updateVoiceProviderSetting('ttsProvider', 'inherit');
+    setSelectedTtsCatalogId(nextCatalogId);
 
     const ttsBundleId = nextCatalogId
       ? modelBundles.find((bundle) => bundle.catalogId === nextCatalogId && bundleHasTts(bundle))?.id || ''
@@ -802,7 +910,7 @@ export default function VoiceSettingsPanel({
         setModelError(error?.message || '切换 TTS 模型失败。');
       }
     }
-  }, [applyVoiceModelList, desktopMode, modelBundles]);
+  }, [applyVoiceModelList, desktopMode, modelBundles, updateVoiceProviderSetting]);
 
   const handleInstallAsrModel = useCallback(async () => {
     if (!desktopMode || !selectedAsrCatalogId) {
@@ -1217,41 +1325,13 @@ export default function VoiceSettingsPanel({
 
       {desktopMode && (
         <Stack spacing={1.5} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
-          <Box sx={{ fontWeight: 600 }}>云端语音供应商（未选择内置模型时生效）</Box>
+          <Box sx={{ fontWeight: 600 }}>云端供应商配置（在清单中选择云端项后生效）</Box>
           <Alert severity="info">
-            内置模型优先级高于这里的云端设置。某一侧未选择内置模型时，会回退到环境变量或你在这里配置的 DashScope。
+            ASR/TTS 清单已合并本地与云端项。选中“阿里百炼（云端）”后，这里的参数会生效。
           </Alert>
           {!voiceProviderSettings.hasSecureStorage && (
             <Alert severity="warning">系统密钥链不可用，DashScope API Key 将回退为本地明文存储。</Alert>
           )}
-          <Stack spacing={1}>
-            <Box sx={{ fontWeight: 600 }}>ASR Provider</Box>
-            <TextField
-              select
-              label="ASR Provider"
-              value={voiceProviderSettings.asrProvider}
-              onChange={(event) => updateVoiceProviderSetting('asrProvider', event.target.value)}
-              disabled={voiceProviderSaving}
-              fullWidth
-            >
-              <MenuItem value="inherit">环境变量 / 内置模型</MenuItem>
-              <MenuItem value="dashscope">阿里百炼 DashScope</MenuItem>
-            </TextField>
-          </Stack>
-          <Stack spacing={1}>
-            <Box sx={{ fontWeight: 600 }}>TTS Provider</Box>
-            <TextField
-              select
-              label="TTS Provider"
-              value={voiceProviderSettings.ttsProvider}
-              onChange={(event) => updateVoiceProviderSetting('ttsProvider', event.target.value)}
-              disabled={voiceProviderSaving}
-              fullWidth
-            >
-              <MenuItem value="inherit">环境变量 / 内置模型</MenuItem>
-              <MenuItem value="dashscope">阿里百炼 DashScope</MenuItem>
-            </TextField>
-          </Stack>
 
           {dashscopeActive && (
             <Stack spacing={1}>
@@ -1372,7 +1452,7 @@ export default function VoiceSettingsPanel({
 
       {desktopMode && (
         <Stack spacing={1.5} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
-          <Box sx={{ fontWeight: 600 }}>本地语音模型管理</Box>
+          <Box sx={{ fontWeight: 600 }}>语音模型清单（本地 + 云端）</Box>
           {catalogItems.length > 0 ? (
             <Stack spacing={1.5}>
               <Stack spacing={1}>
@@ -1380,26 +1460,27 @@ export default function VoiceSettingsPanel({
                 <TextField
                   select
                   label="ASR 模型列表"
-                  value={selectedAsrCatalogId}
+                  value={selectedAsrModelOptionValue}
                   onChange={(event) => {
                     void handleChangeAsrCatalog(event.target.value);
                   }}
                   disabled={modelsLoading || isDownloadingModels}
                   fullWidth
                 >
-                  <MenuItem value="">不使用内置模型（回退环境变量 / 云端供应商）</MenuItem>
-                  {asrCatalogItems.map((item) => (
-                    <MenuItem key={item.id} value={item.id}>
-                      {item.asrOptionLabel || item.name}
+                  {asrModelOptions.map((option) => (
+                    <MenuItem key={option.value || 'asr-auto'} value={option.value}>
+                      {option.label}
                     </MenuItem>
                   ))}
                 </TextField>
                 {!!selectedAsrCatalogId && (
                   <Alert severity="info">
-                    {`ASR: ${selectedAsrCatalogItem?.asrOptionLabel || selectedAsrCatalogItem?.name || ''}`}
+                    {`ASR: ${resolveLocalModelShortLabel(selectedAsrCatalogItem, 'asr')}（本地）`}
                   </Alert>
                 )}
-                {selectedAsrCatalogId ? (
+                {isAsrCloudSelected ? (
+                  <Alert severity="success">所选 ASR 模型状态: 阿里百炼（云端）已生效</Alert>
+                ) : selectedAsrCatalogId ? (
                   <Alert
                     severity={
                       isSelectedAsrCatalogActive
@@ -1414,7 +1495,7 @@ export default function VoiceSettingsPanel({
                         : '所选 ASR 模型状态: 未下载'}
                   </Alert>
                 ) : (
-                  <Alert severity="info">所选 ASR 模型状态: 使用环境变量 / 云端供应商（未选择内置模型）</Alert>
+                  <Alert severity="info">所选 ASR 模型状态: 跟随环境变量（自动）</Alert>
                 )}
                 <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                   {!!selectedAsrCatalogId && (
@@ -1443,26 +1524,27 @@ export default function VoiceSettingsPanel({
                 <TextField
                   select
                   label="TTS 模型列表"
-                  value={selectedTtsCatalogId}
+                  value={selectedTtsModelOptionValue}
                   onChange={(event) => {
                     void handleChangeTtsCatalog(event.target.value);
                   }}
                   disabled={modelsLoading || isDownloadingModels}
                   fullWidth
                 >
-                  <MenuItem value="">不使用内置模型（回退环境变量 / 云端供应商）</MenuItem>
-                  {ttsCatalogItems.map((item) => (
-                    <MenuItem key={item.id} value={item.id}>
-                      {item.ttsOptionLabel || item.name}
+                  {ttsModelOptions.map((option) => (
+                    <MenuItem key={option.value || 'tts-auto'} value={option.value}>
+                      {option.label}
                     </MenuItem>
                   ))}
                 </TextField>
                 {!!selectedTtsCatalogId && (
                   <Alert severity="info">
-                    {`TTS: ${selectedTtsCatalogItem?.ttsOptionLabel || selectedTtsCatalogItem?.name || ''}`}
+                    {`TTS: ${resolveLocalModelShortLabel(selectedTtsCatalogItem, 'tts')}（本地）`}
                   </Alert>
                 )}
-                {selectedTtsCatalogId ? (
+                {isTtsCloudSelected ? (
+                  <Alert severity="success">所选 TTS 模型状态: 阿里百炼（云端）已生效</Alert>
+                ) : selectedTtsCatalogId ? (
                   <Alert
                     severity={
                       isSelectedTtsCatalogActive
@@ -1477,7 +1559,7 @@ export default function VoiceSettingsPanel({
                         : '所选 TTS 模型状态: 未下载'}
                   </Alert>
                 ) : (
-                  <Alert severity="info">所选 TTS 模型状态: 使用环境变量 / 云端供应商（未选择内置模型）</Alert>
+                  <Alert severity="info">所选 TTS 模型状态: 跟随环境变量（自动）</Alert>
                 )}
                 <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                   {!!selectedTtsCatalogId && (
