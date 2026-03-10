@@ -1148,6 +1148,19 @@ export const desktopBridge = {
       }
       return api.voiceModels.download(payload);
     },
+    async remove({ bundleId } = {}) {
+      const api = getDesktopApi();
+      if (!api?.voiceModels?.remove) {
+        return {
+          ok: false,
+          error: {
+            code: 'desktop_voice_models_unavailable',
+            message: '当前环境不支持语音模型删除。',
+          },
+        };
+      }
+      return api.voiceModels.remove({ bundleId });
+    },
     onDownloadProgress(handler) {
       const api = getDesktopApi();
       if (!api?.voiceModels?.onDownloadProgress || typeof handler !== 'function') {

@@ -111,12 +111,29 @@ function registerVoiceModelsIpc({
     }
   });
 
+  ipcMain.handle('voice-models:remove', async (_event, payload = {}) => {
+    try {
+      const result = await voiceModelLibrary.removeBundle(payload);
+      notifySelectionChanged();
+      return {
+        ok: true,
+        ...result,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: toVoiceModelError(error),
+      };
+    }
+  });
+
   return () => {
     ipcMain.removeHandler('voice-models:catalog');
     ipcMain.removeHandler('voice-models:list');
     ipcMain.removeHandler('voice-models:install-catalog');
     ipcMain.removeHandler('voice-models:select');
     ipcMain.removeHandler('voice-models:download');
+    ipcMain.removeHandler('voice-models:remove');
   };
 }
 

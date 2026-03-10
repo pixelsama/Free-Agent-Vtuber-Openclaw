@@ -28,20 +28,24 @@ def download_model(model_id, local_dir, source='auto'):
   errors = []
   normalized_source = (source or 'auto').strip().lower()
 
-  if normalized_source in ('auto', 'huggingface'):
-    try:
-      return download_via_hf(model_id, local_dir)
-    except Exception as error:  # pylint: disable=broad-except
-      errors.append(f'huggingface: {error}')
-      if normalized_source == 'huggingface':
-        raise
+  if normalized_source == 'auto':
+    strategies = (
+      ('modelscope', download_via_modelscope),
+      ('huggingface', download_via_hf),
+    )
+  elif normalized_source == 'modelscope':
+    strategies = (('modelscope', download_via_modelscope),)
+  elif normalized_source == 'huggingface':
+    strategies = (('huggingface', download_via_hf),)
+  else:
+    raise RuntimeError(f'unsupported source: {normalized_source}')
 
-  if normalized_source in ('auto', 'modelscope'):
+  for strategy_name, strategy_fn in strategies:
     try:
-      return download_via_modelscope(model_id, local_dir)
+      return strategy_fn(model_id, local_dir)
     except Exception as error:  # pylint: disable=broad-except
-      errors.append(f'modelscope: {error}')
-      if normalized_source == 'modelscope':
+      errors.append(f'{strategy_name}: {error}')
+      if normalized_source != 'auto':
         raise
 
   raise RuntimeError('; '.join(errors) if errors else 'no download source succeeded')

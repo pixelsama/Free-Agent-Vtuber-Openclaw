@@ -106,6 +106,144 @@ test('selectBundle supports clearing selection', async () => {
   assert.equal(library.listBundles().selectedTtsBundleId, '');
 });
 
+test('removeBundle deletes bundle files and clears active selection', async () => {
+  const { library } = await createLibraryForTest();
+  const downloaded = await library.downloadBundle({
+    bundleName: 'remove-me',
+    asr: {
+      modelUrl: 'https://example.com/asr/model.onnx',
+      tokensUrl: 'https://example.com/asr/tokens.txt',
+    },
+    tts: {
+      modelUrl: 'https://example.com/tts/model.onnx',
+      voicesUrl: 'https://example.com/tts/voices.bin',
+      tokensUrl: 'https://example.com/tts/tokens.txt',
+    },
+  });
+
+  const bundleId = downloaded.bundle.id;
+  const asrModelPath = downloaded.bundle.asr.modelPath;
+  await fs.stat(asrModelPath);
+
+  const result = await library.removeBundle({ bundleId });
+  assert.equal(result.removedBundleId, bundleId);
+  assert.equal(result.selectedAsrBundleId, '');
+  assert.equal(result.selectedTtsBundleId, '');
+  assert.equal(result.bundles.length, 0);
+
+  await assert.rejects(() => fs.stat(asrModelPath), (error) => error?.code === 'ENOENT');
+});
+
+test('removeBundle validates bundle id and existing bundle', async () => {
+  const { library } = await createLibraryForTest();
+
+  await assert.rejects(
+    () => library.removeBundle({ bundleId: '' }),
+    (error) => {
+      assert.equal(error.code, 'voice_model_delete_invalid_input');
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    () => library.removeBundle({ bundleId: 'missing-bundle' }),
+    (error) => {
+      assert.equal(error.code, 'voice_model_bundle_not_found');
+      return true;
+    },
+  );
+});
+
+test('removeBundle recycles unreferenced python env', async () => {
+  const removedEnvIds = [];
+  const { library } = await createLibraryForTest({
+    pythonRuntimeManager: {
+      async init() {},
+    },
+    pythonEnvManager: {
+      async init() {},
+      getEnvById() {
+        return null;
+      },
+      async removeEnv(envId) {
+        removedEnvIds.push(envId);
+        return true;
+      },
+    },
+  });
+
+  library.state = {
+    selectedAsrBundleId: 'python-runtime-asr',
+    selectedTtsBundleId: '',
+    bundles: [
+      {
+        id: 'python-runtime-asr',
+        name: 'python-runtime-asr',
+        runtime: {
+          kind: 'python',
+          pythonEnvId: 'asr-qwen-env',
+          asrModelDir: '/tmp/fake-asr-model',
+        },
+      },
+    ],
+  };
+
+  const result = await library.removeBundle({ bundleId: 'python-runtime-asr' });
+
+  assert.deepEqual(removedEnvIds, ['asr-qwen-env']);
+  assert.deepEqual(result.recycledPythonEnvIds, ['asr-qwen-env']);
+});
+
+test('removeBundle keeps python env when still referenced by another bundle', async () => {
+  const removedEnvIds = [];
+  const { library } = await createLibraryForTest({
+    pythonRuntimeManager: {
+      async init() {},
+    },
+    pythonEnvManager: {
+      async init() {},
+      getEnvById() {
+        return null;
+      },
+      async removeEnv(envId) {
+        removedEnvIds.push(envId);
+        return true;
+      },
+    },
+  });
+
+  library.state = {
+    selectedAsrBundleId: 'python-runtime-asr',
+    selectedTtsBundleId: 'python-runtime-tts',
+    bundles: [
+      {
+        id: 'python-runtime-asr',
+        name: 'python-runtime-asr',
+        runtime: {
+          kind: 'python',
+          pythonEnvId: 'shared-qwen-env',
+          asrModelDir: '/tmp/fake-asr-model',
+        },
+      },
+      {
+        id: 'python-runtime-tts',
+        name: 'python-runtime-tts',
+        runtime: {
+          kind: 'python',
+          pythonEnvId: 'shared-qwen-env',
+          ttsEngine: 'qwen3-mlx',
+          ttsModelDir: '/tmp/fake-tts-model',
+        },
+      },
+    ],
+  };
+
+  const result = await library.removeBundle({ bundleId: 'python-runtime-asr' });
+
+  assert.deepEqual(removedEnvIds, []);
+  assert.deepEqual(result.recycledPythonEnvIds, []);
+});
+
 test('selectBundles allows ASR and TTS from different bundles', async () => {
   const { library } = await createLibraryForTest();
   const asrOnly = await library.downloadBundle({

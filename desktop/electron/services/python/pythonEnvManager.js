@@ -100,6 +100,21 @@ function createEnvId({ profile, pythonVersion, lockHash }) {
   return `${sanitizedProfile || 'python-env'}-py${versionSuffix || 'unknown'}-${lockHash}`;
 }
 
+function resolveEnvDirectory(rootDir, envId) {
+  const normalizedId = sanitizeText(envId);
+  if (!normalizedId) {
+    throw createPythonEnvError('python_env_remove_invalid_input', 'Please provide envId to remove.');
+  }
+
+  const resolvedRoot = path.resolve(rootDir);
+  const candidate = path.resolve(resolvedRoot, normalizedId);
+  const relative = path.relative(resolvedRoot, candidate);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw createPythonEnvError('python_env_remove_invalid_input', `Invalid Python env id: ${normalizedId}`);
+  }
+  return candidate;
+}
+
 class PythonEnvManager {
   constructor(
     app,
@@ -293,6 +308,29 @@ class PythonEnvManager {
       ...record,
       pipPackages: [...record.pipPackages],
     };
+  }
+
+  async removeEnv(envId) {
+    await this.init();
+
+    const normalizedId = sanitizeText(envId);
+    if (!normalizedId) {
+      throw createPythonEnvError('python_env_remove_invalid_input', 'Please provide envId to remove.');
+    }
+
+    const existing = this.envs.get(normalizedId) || null;
+    const envDir = sanitizeText(existing?.envDir) || resolveEnvDirectory(this.rootDir, normalizedId);
+    const existedOnDisk = fs.existsSync(envDir);
+
+    try {
+      await fsp.rm(envDir, { recursive: true, force: true });
+    } catch (error) {
+      const message = sanitizeText(error?.message) || 'Failed to remove Python env.';
+      throw createPythonEnvError('python_env_remove_failed', message);
+    }
+
+    this.envs.delete(normalizedId);
+    return existedOnDisk || Boolean(existing);
   }
 }
 

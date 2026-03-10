@@ -44,6 +44,42 @@ function sanitizeOptionalText(value, fallback = '') {
   return text || fallback;
 }
 
+function resolveBundleDirectory(rootDir, bundleId) {
+  const normalizedId = sanitizeText(bundleId);
+  if (!normalizedId) {
+    return '';
+  }
+
+  const resolvedRoot = path.resolve(rootDir);
+  const candidate = path.resolve(resolvedRoot, normalizedId);
+  const relative = path.relative(resolvedRoot, candidate);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw createVoiceModelError(
+      'voice_model_bundle_invalid',
+      `Invalid model bundle id: ${normalizedId}`,
+    );
+  }
+  return candidate;
+}
+
+function resolveBundlePythonEnvId(bundle = {}) {
+  if (!bundle || bundle.runtime?.kind !== 'python') {
+    return '';
+  }
+  return sanitizeText(bundle.runtime.pythonEnvId);
+}
+
+function collectPythonEnvIdsFromBundles(bundles = []) {
+  const envIds = new Set();
+  for (const bundle of bundles) {
+    const envId = resolveBundlePythonEnvId(bundle);
+    if (envId) {
+      envIds.add(envId);
+    }
+  }
+  return envIds;
+}
+
 function stripAnsiCodes(value) {
   if (typeof value !== 'string') {
     return '';
@@ -850,6 +886,62 @@ class VoiceModelLibrary {
       hasAsr: typeof item.hasAsr === 'boolean' ? item.hasAsr : Boolean(item.asr),
       hasTts: typeof item.hasTts === 'boolean' ? item.hasTts : Boolean(item.tts),
     }));
+  }
+
+  async removeBundle({ bundleId } = {}) {
+    const normalizedBundleId = sanitizeText(bundleId);
+    if (!normalizedBundleId) {
+      throw createVoiceModelError('voice_model_delete_invalid_input', 'Please provide bundleId to remove.');
+    }
+
+    const found = this.state.bundles.find((item) => item.id === normalizedBundleId);
+    if (!found) {
+      throw createVoiceModelError('voice_model_bundle_not_found', `Model bundle not found: ${normalizedBundleId}`);
+    }
+
+    const bundleDir = resolveBundleDirectory(this.bundlesDir, normalizedBundleId);
+    const bundlePythonEnvId = resolveBundlePythonEnvId(found);
+    try {
+      await fsp.rm(bundleDir, { recursive: true, force: true });
+    } catch (error) {
+      throw createVoiceModelError(
+        'voice_model_delete_failed',
+        `Failed to remove model bundle files: ${error?.message || 'unknown error'}`,
+      );
+    }
+
+    this.state.bundles = this.state.bundles.filter((item) => item.id !== normalizedBundleId);
+    if (this.state.selectedAsrBundleId === normalizedBundleId) {
+      this.state.selectedAsrBundleId = '';
+    }
+    if (this.state.selectedTtsBundleId === normalizedBundleId) {
+      this.state.selectedTtsBundleId = '';
+    }
+    await this.persistState();
+
+    const recycledPythonEnvIds = [];
+    if (bundlePythonEnvId && typeof this.pythonEnvManager?.removeEnv === 'function') {
+      const remainingEnvIds = collectPythonEnvIdsFromBundles(this.state.bundles);
+      if (!remainingEnvIds.has(bundlePythonEnvId)) {
+        try {
+          const removed = await this.pythonEnvManager.removeEnv(bundlePythonEnvId);
+          if (removed) {
+            recycledPythonEnvIds.push(bundlePythonEnvId);
+          }
+        } catch (error) {
+          console.warn(
+            `Failed to recycle unreferenced python env ${bundlePythonEnvId}:`,
+            error,
+          );
+        }
+      }
+    }
+
+    return {
+      removedBundleId: normalizedBundleId,
+      recycledPythonEnvIds,
+      ...this.listBundles(),
+    };
   }
 
   async installCatalogBundle({ catalogId, installAsr, installTts } = {}, { onProgress } = {}) {

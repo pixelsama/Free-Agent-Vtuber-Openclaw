@@ -113,3 +113,44 @@ test('voice-models install-catalog triggers background runtime refresh callback'
   await waitFor(() => calls.includes('refresh'));
   assert.deepEqual(calls, ['install', 'refresh']);
 });
+
+test('voice-models remove triggers background runtime refresh callback', async () => {
+  const ipcMain = createIpcMainMock();
+  const calls = [];
+
+  registerVoiceModelsIpc({
+    ipcMain,
+    voiceModelLibrary: {
+      listCatalog() {
+        return [];
+      },
+      listBundles() {
+        return {
+          bundles: [],
+          selectedAsrBundleId: '',
+          selectedTtsBundleId: '',
+        };
+      },
+      async removeBundle(payload) {
+        calls.push(`remove:${payload.bundleId || ''}`);
+        return {
+          removedBundleId: payload.bundleId || '',
+          bundles: [],
+          selectedAsrBundleId: '',
+          selectedTtsBundleId: '',
+        };
+      },
+    },
+    onSelectionChanged: async () => {
+      calls.push('refresh');
+    },
+  });
+
+  const result = await ipcMain.invoke('voice-models:remove', {
+    bundleId: 'bundle-1',
+  });
+
+  assert.equal(result.ok, true);
+  await waitFor(() => calls.includes('refresh'));
+  assert.deepEqual(calls, ['remove:bundle-1', 'refresh']);
+});

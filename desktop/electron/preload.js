@@ -242,6 +242,9 @@ const voiceModels = {
   download(payload) {
     return ipcRenderer.invoke('voice-models:download', payload);
   },
+  remove(payload) {
+    return ipcRenderer.invoke('voice-models:remove', payload);
+  },
   onDownloadProgress(handler) {
     return onChannel('voice-models:download-progress', handler);
   },

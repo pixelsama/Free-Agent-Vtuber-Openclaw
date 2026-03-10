@@ -578,6 +578,7 @@ export default function VoiceSettingsPanel({
   const [selectedTtsCatalogId, setSelectedTtsCatalogId] = useState('');
   const [modelsLoading, setModelsLoading] = useState(false);
   const [isDownloadingModels, setIsDownloadingModels] = useState(false);
+  const [isRemovingModels, setIsRemovingModels] = useState(false);
   const [modelProgress, setModelProgress] = useState(null);
   const [modelFeedback, setModelFeedback] = useState('');
   const [modelError, setModelError] = useState('');
@@ -1148,6 +1149,100 @@ export default function VoiceSettingsPanel({
     }
   }, [applyVoiceModelList, desktopMode, onOpenDownloadCenter, selectedTtsCatalogId]);
 
+  const handleRemoveAsrModel = useCallback(async () => {
+    if (!desktopMode || !selectedAsrCatalogId || !installedAsrCatalogBundle?.id) {
+      return;
+    }
+
+    const modelLabel = resolveLocalModelShortLabel(selectedAsrCatalogItem, 'asr');
+    const confirmed = window.confirm(`确认删除 ASR 模型“${modelLabel}”吗？该操作会删除本地模型文件。`);
+    if (!confirmed) {
+      return;
+    }
+
+    setModelError('');
+    setModelFeedback('');
+    setIsRemovingModels(true);
+
+    try {
+      const result = await desktopBridge.voiceModels.remove({
+        bundleId: installedAsrCatalogBundle.id,
+      });
+      if (!mountedRef.current) {
+        return;
+      }
+
+      if (!result?.ok) {
+        setModelError(result?.error?.message || '删除 ASR 模型失败。');
+        return;
+      }
+
+      applyVoiceModelList(result);
+      setModelFeedback(`ASR 模型“${modelLabel}”已删除。`);
+    } catch (error) {
+      if (mountedRef.current) {
+        setModelError(error?.message || '删除 ASR 模型失败。');
+      }
+    } finally {
+      if (mountedRef.current) {
+        setIsRemovingModels(false);
+      }
+    }
+  }, [
+    applyVoiceModelList,
+    desktopMode,
+    installedAsrCatalogBundle,
+    selectedAsrCatalogId,
+    selectedAsrCatalogItem,
+  ]);
+
+  const handleRemoveTtsModel = useCallback(async () => {
+    if (!desktopMode || !selectedTtsCatalogId || !installedTtsCatalogBundle?.id) {
+      return;
+    }
+
+    const modelLabel = resolveLocalModelShortLabel(selectedTtsCatalogItem, 'tts');
+    const confirmed = window.confirm(`确认删除 TTS 模型“${modelLabel}”吗？该操作会删除本地模型文件。`);
+    if (!confirmed) {
+      return;
+    }
+
+    setModelError('');
+    setModelFeedback('');
+    setIsRemovingModels(true);
+
+    try {
+      const result = await desktopBridge.voiceModels.remove({
+        bundleId: installedTtsCatalogBundle.id,
+      });
+      if (!mountedRef.current) {
+        return;
+      }
+
+      if (!result?.ok) {
+        setModelError(result?.error?.message || '删除 TTS 模型失败。');
+        return;
+      }
+
+      applyVoiceModelList(result);
+      setModelFeedback(`TTS 模型“${modelLabel}”已删除。`);
+    } catch (error) {
+      if (mountedRef.current) {
+        setModelError(error?.message || '删除 TTS 模型失败。');
+      }
+    } finally {
+      if (mountedRef.current) {
+        setIsRemovingModels(false);
+      }
+    }
+  }, [
+    applyVoiceModelList,
+    desktopMode,
+    installedTtsCatalogBundle,
+    selectedTtsCatalogId,
+    selectedTtsCatalogItem,
+  ]);
+
   const handleRunAsrTest = useCallback(async () => {
     if (!desktopMode || isAsrTesting || isTtsTesting) {
       return;
@@ -1500,17 +1595,17 @@ export default function VoiceSettingsPanel({
       {!desktopMode && <Alert severity="warning">{t('voice.desktopOnly')}</Alert>}
 
       {desktopMode && (
-        <VoiceSectionAccordion title="语音模型清单（本地 + 云端）">
+        <VoiceSectionAccordion title="语音供应商清单（本地 + 云端）">
           <Stack spacing={1.5}>
             <VoiceSectionAccordion title="ASR">
               <TextField
                 select
-                label="ASR 模型列表"
+                label="ASR 供应商列表"
                 value={selectedAsrModelOptionValue}
                 onChange={(event) => {
                   void handleChangeAsrCatalog(event.target.value);
                 }}
-                disabled={modelsLoading || isDownloadingModels}
+                disabled={modelsLoading || isDownloadingModels || isRemovingModels}
                 fullWidth
               >
                 {asrModelOptions.map((option) => (
@@ -1623,10 +1718,21 @@ export default function VoiceSettingsPanel({
                       variant="contained"
                       size="small"
                       onClick={handleInstallAsrModel}
-                      disabled={isDownloadingModels}
+                      disabled={isDownloadingModels || isRemovingModels}
                     >
                       {hasInstalledSelectedAsrCatalog ? '重新下载 ASR 模型' : '下载 ASR 模型'}
                     </Button>
+                    {hasInstalledSelectedAsrCatalog && (
+                      <Button
+                        variant="outlined"
+                        color="warning"
+                        size="small"
+                        onClick={handleRemoveAsrModel}
+                        disabled={isDownloadingModels || isRemovingModels}
+                      >
+                        删除 ASR 模型
+                      </Button>
+                    )}
                   </Stack>
                   {!!resolveAsrModelPath(effectiveActiveAsrBundle) && (
                     <TextField
@@ -1643,12 +1749,12 @@ export default function VoiceSettingsPanel({
             <VoiceSectionAccordion title="TTS">
               <TextField
                 select
-                label="TTS 模型列表"
+                label="TTS 供应商列表"
                 value={selectedTtsModelOptionValue}
                 onChange={(event) => {
                   void handleChangeTtsCatalog(event.target.value);
                 }}
-                disabled={modelsLoading || isDownloadingModels}
+                disabled={modelsLoading || isDownloadingModels || isRemovingModels}
                 fullWidth
               >
                 {ttsModelOptions.map((option) => (
@@ -1819,10 +1925,21 @@ export default function VoiceSettingsPanel({
                       variant="contained"
                       size="small"
                       onClick={handleInstallTtsModel}
-                      disabled={isDownloadingModels}
+                      disabled={isDownloadingModels || isRemovingModels}
                     >
                       {hasInstalledSelectedTtsCatalog ? '重新下载 TTS 模型' : '下载 TTS 模型'}
                     </Button>
+                    {hasInstalledSelectedTtsCatalog && (
+                      <Button
+                        variant="outlined"
+                        color="warning"
+                        size="small"
+                        onClick={handleRemoveTtsModel}
+                        disabled={isDownloadingModels || isRemovingModels}
+                      >
+                        删除 TTS 模型
+                      </Button>
+                    )}
                   </Stack>
                   {!!resolveTtsModelPath(effectiveActiveTtsBundle) && (
                     <TextField
@@ -1841,7 +1958,7 @@ export default function VoiceSettingsPanel({
                 variant="text"
                 size="small"
                 onClick={handleRefreshModels}
-                disabled={modelsLoading || isDownloadingModels}
+                disabled={modelsLoading || isDownloadingModels || isRemovingModels}
               >
                 刷新模型状态
               </Button>
