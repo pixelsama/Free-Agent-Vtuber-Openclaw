@@ -1408,7 +1408,11 @@ export default function Live2DControls({
   return (
     <Box className="live2d-controls-root">
       <Stack spacing={1.5}>
-        <Chip size="small" color={modelLoaded ? 'success' : 'warning'} label={statusChip} />
+        {!modelLoaded && (
+          <Alert severity={selectedModel ? 'info' : 'warning'} sx={{ py: 0.5 }}>
+            {statusChip}
+          </Alert>
+        )}
 
         <ModelSettingsPanel
           modelLoaded={modelLoaded}

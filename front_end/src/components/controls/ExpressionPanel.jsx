@@ -35,7 +35,11 @@ export default function ExpressionPanel({
 }) {
   const { t } = useI18n();
   return (
-    <Accordion>
+    <Accordion
+      disableGutters
+      elevation={0}
+      sx={{ border: 1, borderColor: 'divider', borderRadius: 1, '&::before': { display: 'none' } }}
+    >
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center">
           <MoodIcon fontSize="small" />
@@ -88,7 +92,7 @@ export default function ExpressionPanel({
           <Divider />
 
           {expressions.map((expression) => (
-            <Box key={expression.id} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2 }}>
+            <Box key={expression.id} sx={{ p: 1.5, border: 1, borderColor: 'divider', borderRadius: 1 }}>
               <Stack spacing={1}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center">
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>

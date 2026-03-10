@@ -37,7 +37,11 @@ export default function BackgroundPanel({
 }) {
   const { t } = useI18n();
   return (
-    <Accordion>
+    <Accordion
+      disableGutters
+      elevation={0}
+      sx={{ border: 1, borderColor: 'divider', borderRadius: 1, '&::before': { display: 'none' } }}
+    >
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center">
           <WallpaperIcon fontSize="small" />

@@ -47,7 +47,12 @@ export default function ModelSettingsPanel({
   const statusColor = selectedModel ? (modelLoaded ? 'success' : 'warning') : 'default';
 
   return (
-    <Accordion defaultExpanded>
+    <Accordion
+      defaultExpanded
+      disableGutters
+      elevation={0}
+      sx={{ border: 1, borderColor: 'divider', borderRadius: 1, '&::before': { display: 'none' } }}
+    >
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%' }}>
           <SettingsSuggestIcon fontSize="small" />
