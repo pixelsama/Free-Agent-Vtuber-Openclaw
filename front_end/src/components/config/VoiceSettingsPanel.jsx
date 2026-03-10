@@ -1500,9 +1500,9 @@ export default function VoiceSettingsPanel({
       {!desktopMode && <Alert severity="warning">{t('voice.desktopOnly')}</Alert>}
 
       {desktopMode && (
-        <VoiceSectionAccordion title="语音模型清单（本地 + 云端）" defaultExpanded>
+        <VoiceSectionAccordion title="语音模型清单（本地 + 云端）">
           <Stack spacing={1.5}>
-            <VoiceSectionAccordion title="ASR" defaultExpanded>
+            <VoiceSectionAccordion title="ASR">
               <TextField
                 select
                 label="ASR 模型列表"
@@ -1640,7 +1640,7 @@ export default function VoiceSettingsPanel({
               )}
             </VoiceSectionAccordion>
 
-            <VoiceSectionAccordion title="TTS" defaultExpanded>
+            <VoiceSectionAccordion title="TTS">
               <TextField
                 select
                 label="TTS 模型列表"

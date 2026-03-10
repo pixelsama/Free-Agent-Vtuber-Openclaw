@@ -239,7 +239,7 @@ export default function ConfigDrawer({
                   <Alert severity="warning">{t('app.keychainWarning')}</Alert>
                 )}
 
-                <SectionAccordion title={t('app.chatBackendSelector')} defaultExpanded>
+                <SectionAccordion title={t('app.chatBackendSelector')}>
                   <TextField
                     select
                     label={t('app.chatBackendSelector')}
@@ -444,7 +444,7 @@ export default function ConfigDrawer({
                 </SectionAccordion>
 
                 {selectedBackend === 'nanobot' && (
-                  <SectionAccordion title={t('app.nanobotSkillsTitle')} defaultExpanded>
+                  <SectionAccordion title={t('app.nanobotSkillsTitle')}>
                     <Alert severity="info">{t('app.nanobotSkillsHelper')}</Alert>
                     <Stack direction="row" spacing={1}>
                       <Button
@@ -623,7 +623,7 @@ export default function ConfigDrawer({
                   </SectionAccordion>
                 )}
 
-                <SectionAccordion title={t('app.connectionTest')} defaultExpanded>
+                <SectionAccordion title={t('app.connectionTest')}>
                   <Stack direction="row" spacing={1}>
                     <Button
                       variant="outlined"
@@ -658,7 +658,7 @@ export default function ConfigDrawer({
 
             {activeConfigTab === 3 && (
               <Stack spacing={1.5}>
-                <SectionAccordion title={t('preferences.language')} defaultExpanded>
+                <SectionAccordion title={t('preferences.language')}>
                   <Stack direction="row" spacing={1}>
                     <Button
                       size="small"
@@ -677,7 +677,7 @@ export default function ConfigDrawer({
                   </Stack>
                 </SectionAccordion>
 
-                <SectionAccordion title={t('preferences.theme')} defaultExpanded>
+                <SectionAccordion title={t('preferences.theme')}>
                   <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                     <Button
                       size="small"

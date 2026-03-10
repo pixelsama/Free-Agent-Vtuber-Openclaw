@@ -48,7 +48,6 @@ export default function ModelSettingsPanel({
 
   return (
     <Accordion
-      defaultExpanded
       disableGutters
       elevation={0}
       sx={{ border: 1, borderColor: 'divider', borderRadius: 1, '&::before': { display: 'none' } }}
