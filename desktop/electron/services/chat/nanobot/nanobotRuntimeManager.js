@@ -1,15 +1,16 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
-const http = require('node:http');
-const https = require('node:https');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
-const { pipeline } = require('node:stream/promises');
 const { promisify } = require('node:util');
 
 const { PythonRuntimeManager } = require('../../python/pythonRuntimeManager');
 const { PythonEnvManager } = require('../../python/pythonEnvManager');
 const { getDefaultPythonVersion } = require('../../python/pythonRuntimeCatalog');
+const {
+  buildStableDownloadPath,
+  downloadFileWithRetry,
+} = require('../../shared/resumableDownloader');
 
 const execFileAsync = promisify(execFile);
 
@@ -52,138 +53,24 @@ function pathLooksLikeVoiceBundlePython(pythonExecutable) {
   return normalized.includes(`${path.sep}voice-models${path.sep}`) && normalized.includes(`${path.sep}bundles${path.sep}`);
 }
 
-function resolveHttpModule(protocol) {
-  if (protocol === 'http:') {
-    return http;
-  }
-  if (protocol === 'https:') {
-    return https;
-  }
-
-  throw createRuntimeError('nanobot_runtime_download_failed', `Unsupported protocol: ${protocol}`);
-}
-
-function requestWithRedirect(urlString, redirectsLeft) {
-  return new Promise((resolve, reject) => {
-    let parsedUrl;
-    try {
-      parsedUrl = new URL(urlString);
-    } catch {
-      reject(createRuntimeError('nanobot_runtime_download_failed', `Invalid URL: ${urlString}`));
-      return;
-    }
-
-    let client = null;
-    try {
-      client = resolveHttpModule(parsedUrl.protocol);
-    } catch (error) {
-      reject(error);
-      return;
-    }
-
-    const request = client.get(
-      parsedUrl,
-      {
-        headers: {
-          'user-agent': 'free-agent-vtuber-openclaw/nanobot-runtime-downloader',
-        },
-        timeout: DOWNLOAD_TIMEOUT_MS,
-      },
-      (response) => {
-        const statusCode = response.statusCode || 0;
-        const redirectLocation = response.headers.location;
-        if (redirectLocation && statusCode >= 300 && statusCode < 400) {
-          response.resume();
-          if (redirectsLeft <= 0) {
-            reject(
-              createRuntimeError(
-                'nanobot_runtime_download_failed',
-                `Too many redirects while downloading: ${urlString}`,
-              ),
-            );
-            return;
-          }
-
-          const nextUrl = new URL(redirectLocation, parsedUrl).toString();
-          requestWithRedirect(nextUrl, redirectsLeft - 1).then(resolve).catch(reject);
-          return;
-        }
-
-        if (statusCode < 200 || statusCode >= 300) {
-          response.resume();
-          reject(
-            createRuntimeError(
-              'nanobot_runtime_download_failed',
-              `Download failed (${statusCode}) for ${urlString}`,
-            ),
-          );
-          return;
-        }
-
-        resolve(response);
-      },
-    );
-
-    request.on('timeout', () => {
-      request.destroy(
-        createRuntimeError(
-          'nanobot_runtime_download_failed',
-          `Download timeout for ${urlString}`,
-        ),
-      );
-    });
-
-    request.on('error', (error) => {
-      reject(
-        createRuntimeError(
-          'nanobot_runtime_download_failed',
-          error?.message || 'Failed to download Nanobot runtime.',
-        ),
-      );
-    });
-  });
-}
-
 async function downloadFileFromUrl({ url, destinationPath, onProgress }) {
-  const response = await requestWithRedirect(url, MAX_REDIRECTS);
-  const totalBytes = Number.parseInt(response.headers['content-length'], 10);
-  const hasTotalBytes = Number.isFinite(totalBytes) && totalBytes > 0;
-  const expectedTotalBytes = hasTotalBytes ? totalBytes : 0;
-
-  await fsp.mkdir(path.dirname(destinationPath), { recursive: true });
-  const tempPath = `${destinationPath}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const writeStream = fs.createWriteStream(tempPath);
-  let downloadedBytes = 0;
-  const startedAt = Date.now();
-
-  response.on('data', (chunk) => {
-    downloadedBytes += chunk.length;
-    if (typeof onProgress === 'function') {
-      const elapsedSeconds = Math.max(0.001, (Date.now() - startedAt) / 1000);
-      const bytesPerSecond = downloadedBytes / elapsedSeconds;
-      const estimatedRemainingSeconds =
-        expectedTotalBytes > 0 && bytesPerSecond > 0
-          ? Math.max(0, (expectedTotalBytes - downloadedBytes) / bytesPerSecond)
-          : null;
-      onProgress({
-        downloadedBytes,
-        totalBytes: expectedTotalBytes,
-        bytesPerSecond,
-        estimatedRemainingSeconds,
-      });
-    }
+  return downloadFileWithRetry({
+    url,
+    destinationPath,
+    onProgress,
+    createError: createRuntimeError,
+    errorCodes: {
+      protocolUnsupported: 'nanobot_runtime_download_failed',
+      invalidUrl: 'nanobot_runtime_download_failed',
+      redirectOverflow: 'nanobot_runtime_download_failed',
+      httpError: 'nanobot_runtime_download_failed',
+      timeout: 'nanobot_runtime_download_failed',
+      downloadFailed: 'nanobot_runtime_download_failed',
+    },
+    userAgent: 'free-agent-vtuber-openclaw/nanobot-runtime-downloader',
+    maxRedirects: MAX_REDIRECTS,
+    requestTimeoutMs: DOWNLOAD_TIMEOUT_MS,
   });
-
-  try {
-    await pipeline(response, writeStream);
-    await fsp.rename(tempPath, destinationPath);
-  } catch (error) {
-    await fsp.rm(tempPath, { force: true }).catch(() => {});
-    throw createRuntimeError(
-      'nanobot_runtime_download_failed',
-      error?.message || 'Failed to persist Nanobot runtime package.',
-    );
-  }
 }
 
 async function extractTarArchive({ archivePath, destinationDir }) {
@@ -485,7 +372,11 @@ class NanobotRuntimeManager {
 
     const archiveUrl = this.resolveArchiveUrl();
     const installId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const archivePath = path.join(this.downloadsDir, `nanobot-${installId}.tar.gz`);
+    const archivePath = buildStableDownloadPath(
+      this.downloadsDir,
+      archiveUrl,
+      'nanobot.tar.gz',
+    );
     const stagePath = path.join(this.stageDir, installId);
 
     await fsp.mkdir(this.downloadsDir, { recursive: true });

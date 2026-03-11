@@ -1,15 +1,16 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const { execFile, spawn } = require('node:child_process');
-const http = require('node:http');
-const https = require('node:https');
 const path = require('node:path');
-const { pipeline } = require('node:stream/promises');
 const { promisify } = require('node:util');
 
 const { PythonRuntimeManager } = require('../python/pythonRuntimeManager');
 const { PythonEnvManager } = require('../python/pythonEnvManager');
 const { getDefaultPythonVersion } = require('../python/pythonRuntimeCatalog');
+const {
+  buildStableDownloadPath,
+  downloadFileWithRetry,
+} = require('../shared/resumableDownloader');
 const { getBuiltInVoiceModelCatalog } = require('./voiceModelCatalog');
 
 const ROOT_DIR_NAME = 'voice-models';
@@ -667,144 +668,24 @@ async function extractTarArchive({ archivePath, destinationDir }) {
   }
 }
 
-function resolveHttpModule(protocol) {
-  if (protocol === 'http:') {
-    return http;
-  }
-  if (protocol === 'https:') {
-    return https;
-  }
-
-  throw createVoiceModelError('voice_model_download_protocol_unsupported', `Unsupported protocol: ${protocol}`);
-}
-
-function requestWithRedirect(urlString, redirectsLeft) {
-  return new Promise((resolve, reject) => {
-    let parsedUrl;
-    try {
-      parsedUrl = new URL(urlString);
-    } catch {
-      reject(createVoiceModelError('voice_model_download_invalid_url', `Invalid URL: ${urlString}`));
-      return;
-    }
-
-    let client = null;
-    try {
-      client = resolveHttpModule(parsedUrl.protocol);
-    } catch (error) {
-      reject(error);
-      return;
-    }
-    const request = client.get(
-      parsedUrl,
-      {
-        headers: {
-          'user-agent': 'free-agent-vtuber-openclaw/voice-model-downloader',
-        },
-        timeout: DEFAULT_REQUEST_TIMEOUT_MS,
-      },
-      (response) => {
-        const statusCode = response.statusCode || 0;
-        const redirectLocation = response.headers.location;
-        if (
-          redirectLocation
-          && statusCode >= 300
-          && statusCode < 400
-        ) {
-          response.resume();
-          if (redirectsLeft <= 0) {
-            reject(
-              createVoiceModelError(
-                'voice_model_download_redirect_overflow',
-                `Too many redirects while downloading: ${urlString}`,
-              ),
-            );
-            return;
-          }
-
-          const nextUrl = new URL(redirectLocation, parsedUrl).toString();
-          requestWithRedirect(nextUrl, redirectsLeft - 1).then(resolve).catch(reject);
-          return;
-        }
-
-        if (statusCode < 200 || statusCode >= 300) {
-          response.resume();
-          reject(
-            createVoiceModelError(
-              'voice_model_download_http_error',
-              `Download failed (${statusCode}) for ${urlString}`,
-            ),
-          );
-          return;
-        }
-
-        resolve({
-          response,
-          finalUrl: parsedUrl.toString(),
-        });
-      },
-    );
-
-    request.on('timeout', () => {
-      request.destroy(
-        createVoiceModelError(
-          'voice_model_download_timeout',
-          `Download timeout for ${urlString}`,
-        ),
-      );
-    });
-    request.on('error', (error) => {
-      reject(error);
-    });
-  });
-}
-
 async function downloadFileFromUrl({ url, destinationPath, onProgress }) {
-  const { response } = await requestWithRedirect(url, MAX_REDIRECTS);
-  const totalBytes = Number.parseInt(response.headers['content-length'], 10);
-  const hasTotalBytes = Number.isFinite(totalBytes) && totalBytes > 0;
-  const expectedTotal = hasTotalBytes ? totalBytes : 0;
-
-  await fsp.mkdir(path.dirname(destinationPath), { recursive: true });
-  const tempPath = `${destinationPath}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const writeStream = fs.createWriteStream(tempPath);
-
-  let downloadedBytes = 0;
-  const startedAt = Date.now();
-  response.on('data', (chunk) => {
-    downloadedBytes += chunk.length;
-    if (typeof onProgress === 'function') {
-      const elapsedSeconds = Math.max(0.001, (Date.now() - startedAt) / 1000);
-      const bytesPerSecond = downloadedBytes / elapsedSeconds;
-      const estimatedRemainingSeconds =
-        expectedTotal > 0 && bytesPerSecond > 0
-          ? Math.max(0, (expectedTotal - downloadedBytes) / bytesPerSecond)
-          : null;
-      onProgress({
-        downloadedBytes,
-        totalBytes: expectedTotal,
-        bytesPerSecond,
-        estimatedRemainingSeconds,
-      });
-    }
+  return downloadFileWithRetry({
+    url,
+    destinationPath,
+    onProgress,
+    createError: createVoiceModelError,
+    errorCodes: {
+      protocolUnsupported: 'voice_model_download_protocol_unsupported',
+      invalidUrl: 'voice_model_download_invalid_url',
+      redirectOverflow: 'voice_model_download_redirect_overflow',
+      httpError: 'voice_model_download_http_error',
+      timeout: 'voice_model_download_timeout',
+      downloadFailed: 'voice_model_download_failed',
+    },
+    userAgent: 'free-agent-vtuber-openclaw/voice-model-downloader',
+    maxRedirects: MAX_REDIRECTS,
+    requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
   });
-
-  try {
-    await pipeline(response, writeStream);
-    await fsp.rename(tempPath, destinationPath);
-  } catch (error) {
-    try {
-      await fsp.rm(tempPath, { force: true });
-    } catch {
-      // noop
-    }
-    throw error;
-  }
-
-  return {
-    downloadedBytes,
-    totalBytes: expectedTotal,
-  };
 }
 
 class VoiceModelLibrary {
@@ -829,6 +710,7 @@ class VoiceModelLibrary {
 
     this.rootDir = path.join(this.app.getPath('userData'), ROOT_DIR_NAME);
     this.bundlesDir = path.join(this.rootDir, BUNDLES_DIR_NAME);
+    this.downloadsDir = path.join(this.rootDir, 'downloads');
     this.stateFilePath = path.join(this.rootDir, STATE_FILE_NAME);
     this.state = normalizeState({});
   }
@@ -837,6 +719,7 @@ class VoiceModelLibrary {
     await this.pythonRuntimeManager.init();
     await this.pythonEnvManager.init();
     await fsp.mkdir(this.bundlesDir, { recursive: true });
+    await fsp.mkdir(this.downloadsDir, { recursive: true });
 
     try {
       const raw = await fsp.readFile(this.stateFilePath, 'utf-8');
@@ -1056,7 +939,11 @@ class VoiceModelLibrary {
 
     try {
       for (const component of components) {
-        const archivePath = path.join(bundleDir, `${component.key}.tar.bz2`);
+        const archivePath = buildStableDownloadPath(
+          this.downloadsDir,
+          component.archiveUrl,
+          `${component.key}.tar.bz2`,
+        );
         const extractedBaseDir = path.join(bundleDir, component.key);
 
         await this.downloadFileImpl({
