@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -8,19 +9,23 @@ from pathlib import Path
 def download_via_hf(repo_id, local_dir):
   from huggingface_hub import snapshot_download
 
-  snapshot_download(
-      repo_id=repo_id,
-      local_dir=local_dir,
-      local_dir_use_symlinks=False,
-      resume_download=True,
-  )
+  # Keep stdout clean for final JSON payload; third-party progress logs go to stderr.
+  with contextlib.redirect_stdout(sys.stderr):
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=local_dir,
+        local_dir_use_symlinks=False,
+        resume_download=True,
+    )
   return 'huggingface'
 
 
 def download_via_modelscope(model_id, local_dir):
   from modelscope.hub.snapshot_download import snapshot_download
 
-  snapshot_download(model_id=model_id, local_dir=local_dir)
+  # Keep stdout clean for final JSON payload; third-party progress logs go to stderr.
+  with contextlib.redirect_stdout(sys.stderr):
+    snapshot_download(model_id=model_id, local_dir=local_dir)
   return 'modelscope'
 
 

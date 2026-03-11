@@ -648,6 +648,25 @@ function parseJsonOutput(rawText, code, fallbackMessage) {
   try {
     return JSON.parse(text);
   } catch {
+    // Best-effort fallback for noisy stdout where logs may appear before/after JSON.
+    const lastBraceIndex = text.lastIndexOf('{');
+    const lastClosingBraceIndex = text.lastIndexOf('}');
+    if (lastBraceIndex >= 0 && lastClosingBraceIndex > lastBraceIndex) {
+      for (let start = lastBraceIndex; start >= 0; start = text.lastIndexOf('{', start - 1)) {
+        if (start < 0 || lastClosingBraceIndex <= start) {
+          continue;
+        }
+        const candidate = text.slice(start, lastClosingBraceIndex + 1).trim();
+        if (!candidate) {
+          continue;
+        }
+        try {
+          return JSON.parse(candidate);
+        } catch {
+          // continue scanning earlier candidates
+        }
+      }
+    }
     throw createVoiceModelError(code, fallbackMessage);
   }
 }
