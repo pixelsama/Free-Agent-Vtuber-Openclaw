@@ -11,50 +11,11 @@ import {
   Typography,
 } from '@mui/material';
 import { useI18n } from '../../i18n/I18nContext.jsx';
-
-function formatBytes(value) {
-  const bytes = Number.isFinite(value) ? value : 0;
-  if (bytes <= 0) {
-    return '0 B';
-  }
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function formatBytesPerSecond(value) {
-  const bytesPerSecond = Number.isFinite(value) ? value : 0;
-  if (bytesPerSecond <= 0) {
-    return '0 B/s';
-  }
-  return `${formatBytes(bytesPerSecond)}/s`;
-}
-
-function formatEta(value) {
-  if (!Number.isFinite(value) || value < 0) {
-    return '--';
-  }
-
-  const totalSeconds = Math.max(0, Math.round(value));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${seconds}s`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-  return `${seconds}s`;
-}
+import {
+  resolveTaskProgressValue,
+  resolveTaskStatsText,
+  resolveTaskStatusText,
+} from './taskPresentation.js';
 
 export default function UnifiedDownloadDialog({
   open = false,
@@ -67,22 +28,9 @@ export default function UnifiedDownloadDialog({
   const phase = task?.phase || 'idle';
   const isRunning = phase !== 'completed' && phase !== 'failed' && phase !== 'idle';
   const title = task?.title || t('download.defaultTitle');
-  const progressValue = typeof task?.overallProgress === 'number' ? Math.min(100, Math.max(0, task.overallProgress * 100)) : 0;
-  const statusText =
-    task?.currentFile
-    || (phase === 'completed'
-      ? '任务完成。'
-      : phase === 'failed'
-        ? '任务失败。'
-        : t('download.preparing'));
-  const statsText =
-    phase === 'completed'
-      ? '下载与安装已完成。'
-      : phase === 'failed'
-        ? '下载或安装未完成。'
-        : Number.isFinite(task?.fileTotalBytes) && task.fileTotalBytes > 0
-          ? `${formatBytes(task?.fileDownloadedBytes || 0)} / ${formatBytes(task?.fileTotalBytes || 0)} · ${formatBytesPerSecond(task?.downloadSpeedBytesPerSec || 0)} · ${t('download.eta')} ${formatEta(task?.estimatedRemainingSeconds)}`
-          : t('download.waitingStats');
+  const progressValue = resolveTaskProgressValue(task);
+  const statusText = resolveTaskStatusText(task, t);
+  const statsText = resolveTaskStatsText(task, t);
 
   return (
     <Dialog

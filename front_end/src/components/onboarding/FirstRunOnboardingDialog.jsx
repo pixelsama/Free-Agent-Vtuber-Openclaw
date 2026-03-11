@@ -19,6 +19,11 @@ import {
 } from '@mui/material';
 import { desktopBridge } from '../../services/desktopBridge.js';
 import { useI18n, LANGUAGE_EN_US, LANGUAGE_ZH_CN } from '../../i18n/I18nContext.jsx';
+import {
+  resolveTaskProgressValue,
+  resolveTaskStatsText,
+  resolveTaskStatusText,
+} from '../download/taskPresentation.js';
 
 const ASR_TEST_RECORD_MS = 3000;
 const ASR_TEST_SAMPLE_RATE = 16000;
@@ -250,44 +255,6 @@ function formatMs(value) {
     return '-';
   }
   return `${Math.round(value)} ms`;
-}
-
-function formatBytes(value) {
-  const bytes = Number.isFinite(value) ? value : 0;
-  if (bytes <= 0) {
-    return '0 B';
-  }
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function formatBytesPerSecond(value) {
-  const bytesPerSecond = Number.isFinite(value) ? value : 0;
-  if (bytesPerSecond <= 0) {
-    return '0 B/s';
-  }
-  return `${formatBytes(bytesPerSecond)}/s`;
-}
-
-function formatEta(value) {
-  if (!Number.isFinite(value) || value < 0) {
-    return '--';
-  }
-  const totalSeconds = Math.max(0, Math.round(value));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-  return `${seconds}s`;
 }
 
 function isDownloadRunningPhase(phase) {
@@ -1066,26 +1033,9 @@ export default function FirstRunOnboardingDialog({
 
   const renderInlineDownloadCard = ({ title = '', task = null, detailsOpen = false, onToggleDetails = null } = {}) => {
     const normalizedTask = task || {};
-    const phase = typeof normalizedTask.phase === 'string' ? normalizedTask.phase : 'idle';
-    const progressValue =
-      typeof normalizedTask.overallProgress === 'number'
-        ? Math.min(100, Math.max(0, normalizedTask.overallProgress * 100))
-        : 0;
-    const statusText =
-      normalizedTask.currentFile
-      || (phase === 'completed'
-        ? t('onboarding.download.completed')
-        : phase === 'failed'
-          ? t('onboarding.download.failed')
-          : t('download.preparing'));
-    const statsText =
-      phase === 'completed'
-        ? t('onboarding.download.completedStats')
-        : phase === 'failed'
-          ? t('onboarding.download.failedStats')
-          : Number.isFinite(normalizedTask.fileTotalBytes) && normalizedTask.fileTotalBytes > 0
-            ? `${formatBytes(normalizedTask.fileDownloadedBytes || 0)} / ${formatBytes(normalizedTask.fileTotalBytes || 0)} · ${formatBytesPerSecond(normalizedTask.downloadSpeedBytesPerSec || 0)} · ${t('download.eta')} ${formatEta(normalizedTask.estimatedRemainingSeconds)}`
-            : t('onboarding.download.waitingStats');
+    const progressValue = resolveTaskProgressValue(normalizedTask);
+    const statusText = resolveTaskStatusText(normalizedTask, t);
+    const statsText = resolveTaskStatsText(normalizedTask, t);
 
     return (
       <Stack
