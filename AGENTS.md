@@ -143,6 +143,8 @@
 
 ## Commit & PR Guidelines
 - Conventional commit style: `feat:`, `fix:`, `test:`, `chore:`.
+- After completing a user-requested code change in this repo, stage only the files relevant to that task and create a git commit before ending the turn unless the user explicitly says not to commit or the task is still incomplete/blocking.
+- Do not leave task-related code edits uncommitted at the end of an implementation turn; if a commit cannot be made, explain the blocker explicitly in the final response.
 - PR should include:
   - Scope and rationale
   - User-visible behavior changes
