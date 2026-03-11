@@ -141,6 +141,46 @@
   - `pnpm run test:frontend`
   - `cd front_end && pnpm run lint`
 
+## GUI Real-Device Download Regression (Installed App)
+- Scope:
+  - Validate first-run onboarding flow in installed app (`/Applications/Free Agent VTuber OpenClaw.app`).
+  - Cover full path: `Nanobot runtime` download + `Qwen ASR` model download + `Qwen TTS` model download.
+  - Focus on download area UX: status text, progress %, speed, ETA, stage transitions, completion/failure messaging.
+- Reset before run (macOS):
+  - Quit app process first.
+  - Remove app data: `~/Library/Application Support/free-agent-vtuber-openclaw-desktop`.
+  - Remove prefs: `~/Library/Preferences/com.freeagent.vtuber.openclaw.plist`.
+  - Remove keychain secrets (if present): service `free-agent-vtuber-openclaw`, accounts:
+    - `openclaw-token`
+    - `nanobot-api-key`
+    - `dashscope-api-key`
+- Launch mode:
+  - Prefer installed app with remote debugging enabled:
+    - `open -a "/Applications/Free Agent VTuber OpenClaw.app" --args --remote-debugging-port=9222`
+  - Do not rely only on macOS AX tree for React controls; AX often exposes only container groups.
+  - Use CDP (port `9222`) to drive real GUI DOM interactions.
+- Stable CDP interaction rules for MUI controls:
+  - For MUI `TextField select`, interact with `[role="combobox"]`.
+  - Open dropdown via `mousedown` + `click` on combobox, then select `li[role="option"]`.
+  - Do not assume static ids; match by nearby label/outer text (`推理后端`, `ASR 来源`, `ASR 本地模型`, `TTS 来源`, `TTS 本地模型`).
+- Download-monitor checklist:
+  - `Nanobot`: verify stages like Python runtime download/extract/install and final completion text.
+  - `ASR/TTS`: verify Python env setup stages (`创建 env`, `安装依赖 n/5`), then model bytes/speed/ETA.
+  - Confirm final state switches to installed and button text changes (`下载模型` -> `重新下载`).
+- Severity rule during run:
+  - If a blocking failure appears (`无法下载`, persistent failed phase, unrecoverable navigation dead-end), stop further steps immediately.
+  - Output root-cause analysis + concrete patch plan instead of continuing the remaining download flow.
+- Suggested evidence artifacts (for reproducible reports):
+  - Save automation logs/report under `/tmp/openclaw-gui-test/`, e.g.:
+    - `cdp_full_flow.log`
+    - `full-flow-report.json`
+  - Report should include:
+    - exact step where issue occurred,
+    - visible UI text at that moment,
+    - expected vs actual behavior,
+    - user-impact severity (`P1/P2/P3`),
+    - patch target files/functions.
+
 ## Commit & PR Guidelines
 - Conventional commit style: `feat:`, `fix:`, `test:`, `chore:`.
 - After completing a user-requested code change in this repo, stage only the files relevant to that task and create a git commit before ending the turn unless the user explicitly says not to commit or the task is still incomplete/blocking.
