@@ -264,7 +264,9 @@ function isDownloadRunningPhase(phase) {
 
 function shouldAutoExpandDownloadDetails(task = {}, nowMs = Date.now()) {
   const phase = typeof task?.phase === 'string' ? task.phase.trim().toLowerCase() : '';
-  if (phase !== 'installing' && phase !== 'extracting') {
+  const currentFile = typeof task?.currentFile === 'string' ? task.currentFile.trim() : '';
+  const runningInstallLike = phase === 'running' && /安装|解压|install|extract|env|pip/i.test(currentFile);
+  if (phase !== 'installing' && phase !== 'extracting' && !runningInstallLike) {
     return false;
   }
 
