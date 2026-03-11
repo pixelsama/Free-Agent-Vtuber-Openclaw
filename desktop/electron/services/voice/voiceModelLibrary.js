@@ -919,6 +919,7 @@ class VoiceModelLibrary {
         type: 'download-progress',
         taskId: progressTaskId,
         taskTitle: progressTaskTitle,
+        catalogId: normalizedCatalogId,
         phase,
         bundleId: id,
         bundleName: name,
@@ -1131,6 +1132,7 @@ class VoiceModelLibrary {
     installTarget = null,
     onProgress,
   }) {
+    const normalizedCatalogId = sanitizeText(catalogEntry?.id);
     const runtime = catalogEntry?.runtime && typeof catalogEntry.runtime === 'object'
       ? catalogEntry.runtime
       : {};
@@ -1190,6 +1192,7 @@ class VoiceModelLibrary {
         type: 'download-progress',
         taskId: progressTaskId,
         taskTitle: progressTaskTitle,
+        catalogId: normalizedCatalogId,
         phase,
         bundleId: id,
         bundleName: name,

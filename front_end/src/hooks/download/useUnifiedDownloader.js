@@ -4,6 +4,8 @@ function createTask(id, title = '') {
   return {
     id,
     title,
+    catalogId: '',
+    installTarget: '',
     phase: 'idle',
     completedTasks: 0,
     totalTasks: 0,
@@ -133,12 +135,16 @@ export function useUnifiedDownloader() {
     const currentFile = decodeDisplayText(payload?.currentFile);
     const completedTasks = Number.isFinite(payload?.completedTasks) ? payload.completedTasks : 0;
     const totalTasks = Number.isFinite(payload?.totalTasks) ? payload.totalTasks : 0;
+    const catalogId = typeof payload?.catalogId === 'string' ? payload.catalogId.trim() : '';
+    const installTarget = typeof payload?.installTarget === 'string' ? payload.installTarget.trim().toLowerCase() : '';
     const nowMs = Date.now();
 
     upsertTask(taskId, (current) => ({
       ...current,
       id: taskId,
       title: title || current.title || taskId,
+      catalogId: catalogId || current.catalogId || '',
+      installTarget: installTarget || current.installTarget || '',
       phase,
       completedTasks,
       totalTasks,

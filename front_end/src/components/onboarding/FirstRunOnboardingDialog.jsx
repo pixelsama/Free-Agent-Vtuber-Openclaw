@@ -295,6 +295,68 @@ function isDownloadRunningPhase(phase) {
   return Boolean(value && value !== 'idle' && value !== 'completed' && value !== 'failed');
 }
 
+function findVoiceDownloadTaskByCapability({
+  taskMap = {},
+  capability = 'asr',
+  preferredCatalogId = '',
+} = {}) {
+  if (!taskMap || typeof taskMap !== 'object') {
+    return null;
+  }
+
+  const normalizedCapability = capability === 'tts' ? 'tts' : 'asr';
+  const targetSuffixes = normalizedCapability === 'asr' ? new Set(['asr', 'asr-tts']) : new Set(['tts', 'asr-tts']);
+  const normalizedCatalogId = typeof preferredCatalogId === 'string' ? preferredCatalogId.trim() : '';
+  let winner = null;
+
+  for (const [taskId, task] of Object.entries(taskMap)) {
+    if (typeof taskId !== 'string' || !taskId.startsWith('voice-models:') || !task || typeof task !== 'object') {
+      continue;
+    }
+
+    const taskInstallTarget = typeof task.installTarget === 'string' ? task.installTarget.trim().toLowerCase() : '';
+    const taskIdSuffix = (taskId.split(':').at(-1) || '').trim().toLowerCase();
+    const taskTarget = taskInstallTarget || taskIdSuffix;
+    if (!targetSuffixes.has(taskTarget)) {
+      continue;
+    }
+
+    const phase = typeof task.phase === 'string' ? task.phase.trim().toLowerCase() : 'idle';
+    const phaseRank = isDownloadRunningPhase(phase) ? 3 : (phase === 'completed' ? 2 : (phase === 'failed' ? 1 : 0));
+    const updatedAt = Number.isFinite(task.updatedAt) ? task.updatedAt : 0;
+    const taskCatalogId = typeof task.catalogId === 'string' ? task.catalogId.trim() : '';
+    const catalogMatched = Boolean(
+      normalizedCatalogId
+      && (taskCatalogId === normalizedCatalogId || taskId.includes(`:${normalizedCatalogId}:`)),
+    );
+
+    if (!winner) {
+      winner = { task, phaseRank, updatedAt, catalogMatched };
+      continue;
+    }
+
+    if (catalogMatched !== winner.catalogMatched) {
+      if (catalogMatched) {
+        winner = { task, phaseRank, updatedAt, catalogMatched };
+      }
+      continue;
+    }
+
+    if (phaseRank !== winner.phaseRank) {
+      if (phaseRank > winner.phaseRank) {
+        winner = { task, phaseRank, updatedAt, catalogMatched };
+      }
+      continue;
+    }
+
+    if (updatedAt > winner.updatedAt) {
+      winner = { task, phaseRank, updatedAt, catalogMatched };
+    }
+  }
+
+  return winner?.task || null;
+}
+
 const BACKEND_SUB_STEP_COUNT = 3;
 const TOTAL_STEPS = 4;
 
@@ -369,8 +431,22 @@ export default function FirstRunOnboardingDialog({
     ? nanobotRuntimeDownloadTask.phase
     : 'idle';
   const nanobotRuntimeDownloading = isDownloadRunningPhase(nanobotDownloadPhase);
-  const asrDownloadTask = selectedAsrCatalogId ? voiceDownloadTasks[`voice-models:${selectedAsrCatalogId}:asr`] || null : null;
-  const ttsDownloadTask = selectedTtsCatalogId ? voiceDownloadTasks[`voice-models:${selectedTtsCatalogId}:tts`] || null : null;
+  const asrDownloadTask = useMemo(
+    () => findVoiceDownloadTaskByCapability({
+      taskMap: voiceDownloadTasks,
+      capability: 'asr',
+      preferredCatalogId: selectedAsrCatalogId,
+    }),
+    [selectedAsrCatalogId, voiceDownloadTasks],
+  );
+  const ttsDownloadTask = useMemo(
+    () => findVoiceDownloadTaskByCapability({
+      taskMap: voiceDownloadTasks,
+      capability: 'tts',
+      preferredCatalogId: selectedTtsCatalogId,
+    }),
+    [selectedTtsCatalogId, voiceDownloadTasks],
+  );
   const asrDownloadPhase = typeof asrDownloadTask?.phase === 'string' ? asrDownloadTask.phase : 'idle';
   const ttsDownloadPhase = typeof ttsDownloadTask?.phase === 'string' ? ttsDownloadTask.phase : 'idle';
   const shouldShowAsrDownloadCard = asrSource === 'local'
