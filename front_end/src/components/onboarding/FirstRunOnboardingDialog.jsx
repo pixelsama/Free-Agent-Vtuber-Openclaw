@@ -3,10 +3,12 @@ import {
   Alert,
   Box,
   Button,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  LinearProgress,
   MenuItem,
   Stack,
   Step,
@@ -210,7 +212,51 @@ function formatMs(value) {
   return `${Math.round(value)} ms`;
 }
 
+function formatBytes(value) {
+  const bytes = Number.isFinite(value) ? value : 0;
+  if (bytes <= 0) {
+    return '0 B';
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function formatBytesPerSecond(value) {
+  const bytesPerSecond = Number.isFinite(value) ? value : 0;
+  if (bytesPerSecond <= 0) {
+    return '0 B/s';
+  }
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
+function formatEta(value) {
+  if (!Number.isFinite(value) || value < 0) {
+    return '--';
+  }
+  const totalSeconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+function isDownloadRunningPhase(phase) {
+  const value = typeof phase === 'string' ? phase.trim().toLowerCase() : '';
+  return Boolean(value && value !== 'idle' && value !== 'completed' && value !== 'failed');
+}
+
 const STEP_LABELS = ['推理后端', 'ASR', 'TTS'];
+const BACKEND_SUB_STEP_LABELS = ['选择后端', '配置后端', '启用与测试'];
 
 export default function FirstRunOnboardingDialog({
   open = false,
@@ -226,13 +272,15 @@ export default function FirstRunOnboardingDialog({
   onPickNanobotWorkspace,
   onTestChatBackendSettings,
   nanobotRuntimeStatus = {},
+  nanobotRuntimeDownloadTask = null,
   nanobotRuntimeInstalling = false,
   onInstallNanobotRuntime,
-  onOpenDownloadCenter,
   onFinish,
 }) {
   const mountedRef = useRef(true);
   const [activeStep, setActiveStep] = useState(0);
+  const [backendSubStep, setBackendSubStep] = useState(0);
+  const [backendDownloadDetailsOpen, setBackendDownloadDetailsOpen] = useState(false);
 
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceSaving, setVoiceSaving] = useState(false);
@@ -263,6 +311,15 @@ export default function FirstRunOnboardingDialog({
   const selectedBackend = chatBackendSettings?.chatBackend === 'nanobot' ? 'nanobot' : 'openclaw';
   const openClawSettings = chatBackendSettings?.openclaw || {};
   const nanobotSettings = chatBackendSettings?.nanobot || {};
+  const nanobotDownloadPhase = typeof nanobotRuntimeDownloadTask?.phase === 'string'
+    ? nanobotRuntimeDownloadTask.phase
+    : 'idle';
+  const nanobotRuntimeDownloading = isDownloadRunningPhase(nanobotDownloadPhase);
+  const shouldShowNanobotDownloadCard = selectedBackend === 'nanobot'
+    && (nanobotRuntimeDownloading
+      || nanobotDownloadPhase === 'completed'
+      || nanobotDownloadPhase === 'failed'
+      || (Array.isArray(nanobotRuntimeDownloadTask?.logs) && nanobotRuntimeDownloadTask.logs.length > 0));
   const isBusy = settingsSaving
     || settingsTesting
     || nanobotRuntimeInstalling
@@ -383,17 +440,12 @@ export default function FirstRunOnboardingDialog({
   useEffect(() => {
     if (!open) {
       setActiveStep(0);
+      setBackendSubStep(0);
+      setBackendDownloadDetailsOpen(false);
       return;
     }
     void loadVoiceContext();
   }, [loadVoiceContext, open]);
-
-  useEffect(() => {
-    if (!open || selectedBackend !== 'nanobot' || nanobotSettings.enabled) {
-      return;
-    }
-    onNanobotSettingChange?.('enabled', true);
-  }, [nanobotSettings.enabled, onNanobotSettingChange, open, selectedBackend]);
 
   const saveVoiceSettings = useCallback(
     async (payload) => {
@@ -584,7 +636,6 @@ export default function FirstRunOnboardingDialog({
     setVoiceError('');
     setVoiceFeedback('');
     setIsInstallingAsr(true);
-    onOpenDownloadCenter?.('voice-models');
     try {
       const result = await desktopBridge.voiceModels.installCatalog(selectedAsrCatalogId, {
         installAsr: true,
@@ -604,7 +655,7 @@ export default function FirstRunOnboardingDialog({
         setIsInstallingAsr(false);
       }
     }
-  }, [loadVoiceContext, onOpenDownloadCenter, selectedAsrCatalogId]);
+  }, [loadVoiceContext, selectedAsrCatalogId]);
 
   const handleInstallTts = useCallback(async () => {
     if (!selectedTtsCatalogId) {
@@ -615,7 +666,6 @@ export default function FirstRunOnboardingDialog({
     setVoiceError('');
     setVoiceFeedback('');
     setIsInstallingTts(true);
-    onOpenDownloadCenter?.('voice-models');
     try {
       const result = await desktopBridge.voiceModels.installCatalog(selectedTtsCatalogId, {
         installAsr: false,
@@ -635,7 +685,7 @@ export default function FirstRunOnboardingDialog({
         setIsInstallingTts(false);
       }
     }
-  }, [loadVoiceContext, onOpenDownloadCenter, selectedTtsCatalogId]);
+  }, [loadVoiceContext, selectedTtsCatalogId]);
 
   const handleRunAsrTest = useCallback(async () => {
     if (asrTesting || ttsTesting) {
@@ -742,6 +792,12 @@ export default function FirstRunOnboardingDialog({
     setVoiceError('');
     setVoiceFeedback('');
 
+    if (activeStep === 0) {
+      setBackendSubStep(0);
+      setActiveStep(1);
+      return;
+    }
+
     if (activeStep === 1) {
       setAsrSource('skip');
     }
@@ -757,6 +813,11 @@ export default function FirstRunOnboardingDialog({
   }, [activeStep, onFinish]);
 
   const handleNext = useCallback(async () => {
+    if (activeStep === 0 && backendSubStep < BACKEND_SUB_STEP_LABELS.length - 1) {
+      setBackendSubStep((current) => Math.min(BACKEND_SUB_STEP_LABELS.length - 1, current + 1));
+      return;
+    }
+
     if (activeStep === 1) {
       const ok = await applyAsrConfig();
       if (!ok) {
@@ -775,130 +836,269 @@ export default function FirstRunOnboardingDialog({
       await onFinish?.();
       return;
     }
+    if (activeStep === 0) {
+      setBackendSubStep(0);
+    }
     setActiveStep((current) => Math.min(STEP_LABELS.length - 1, current + 1));
-  }, [activeStep, applyAsrConfig, applyTtsConfig, onFinish]);
+  }, [activeStep, applyAsrConfig, applyTtsConfig, backendSubStep, onFinish]);
 
   const handleBack = useCallback(() => {
+    if (activeStep === 0 && backendSubStep > 0) {
+      setBackendSubStep((current) => Math.max(0, current - 1));
+      return;
+    }
     setActiveStep((current) => Math.max(0, current - 1));
-  }, []);
+  }, [activeStep, backendSubStep]);
 
-  const renderBackendStep = () => {
-    const testDisabled = settingsSaving || settingsTesting || (selectedBackend === 'nanobot' && !nanobotSettings.enabled);
+  const renderNanobotDownloadCard = () => {
+    if (!shouldShowNanobotDownloadCard) {
+      return null;
+    }
+
+    const task = nanobotRuntimeDownloadTask || {};
+    const phase = typeof task.phase === 'string' ? task.phase : 'idle';
+    const progressValue =
+      typeof task.overallProgress === 'number'
+        ? Math.min(100, Math.max(0, task.overallProgress * 100))
+        : 0;
+    const statusText =
+      task.currentFile
+      || (phase === 'completed'
+        ? '任务完成。'
+        : phase === 'failed'
+          ? '任务失败。'
+          : '准备中...');
+    const statsText =
+      phase === 'completed'
+        ? '下载与安装已完成。'
+        : phase === 'failed'
+          ? '下载或安装未完成。'
+          : Number.isFinite(task.fileTotalBytes) && task.fileTotalBytes > 0
+            ? `${formatBytes(task.fileDownloadedBytes || 0)} / ${formatBytes(task.fileTotalBytes || 0)} · ${formatBytesPerSecond(task.downloadSpeedBytesPerSec || 0)} · 预计剩余 ${formatEta(task.estimatedRemainingSeconds)}`
+            : '下载数据同步中...';
+
+    return (
+      <Stack
+        spacing={1}
+        sx={{
+          p: 1.5,
+          borderRadius: 2,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+        }}
+      >
+        <Typography variant="subtitle2">Nanobot 运行时下载与安装</Typography>
+        <LinearProgress
+          variant={typeof task.overallProgress === 'number' ? 'determinate' : 'indeterminate'}
+          value={progressValue}
+        />
+        <Typography variant="body2" color="text.secondary">
+          {statusText}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {statsText}
+        </Typography>
+        <Button
+          variant="text"
+          size="small"
+          sx={{ alignSelf: 'flex-end' }}
+          onClick={() => setBackendDownloadDetailsOpen((current) => !current)}
+        >
+          {backendDownloadDetailsOpen ? '隐藏详情' : '详情'}
+        </Button>
+        <Collapse in={backendDownloadDetailsOpen}>
+          <Box
+            component="pre"
+            sx={{
+              m: 0,
+              p: 1.5,
+              maxHeight: 180,
+              overflow: 'auto',
+              borderRadius: 1,
+              bgcolor: 'action.hover',
+              color: 'text.primary',
+              fontSize: 12,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {Array.isArray(task.logs) && task.logs.length ? task.logs.join('\n') : '暂无日志'}
+          </Box>
+        </Collapse>
+      </Stack>
+    );
+  };
+
+  const renderBackendSourceSubStep = () => (
+    <Stack spacing={1.5}>
+      <Typography variant="body2" color="text.secondary">
+        子步骤 1/3：先选择推理后端。如果选择 Nanobot，可以直接下载运行时。
+      </Typography>
+
+      <TextField
+        select
+        label="推理后端"
+        value={selectedBackend}
+        onChange={(event) => onChatBackendChange?.(event.target.value)}
+        fullWidth
+      >
+        <MenuItem value="openclaw">OpenClaw</MenuItem>
+        <MenuItem value="nanobot">Nanobot</MenuItem>
+      </TextField>
+
+      {selectedBackend === 'nanobot' && (
+        <Stack spacing={1}>
+          <Alert severity={nanobotRuntimeStatus.installed ? 'success' : 'warning'}>
+            {nanobotRuntimeStatus.installed ? 'Nanobot 运行时已安装。' : '未安装 Nanobot 运行时。'}
+          </Alert>
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={nanobotRuntimeInstalling}
+            onClick={() => onInstallNanobotRuntime?.()}
+          >
+            {nanobotRuntimeInstalling ? '下载中...' : '下载/更新 Nanobot 运行时'}
+          </Button>
+          {renderNanobotDownloadCard()}
+        </Stack>
+      )}
+    </Stack>
+  );
+
+  const renderBackendConfigSubStep = () => (
+    <Stack spacing={1.5}>
+      <Typography variant="body2" color="text.secondary">
+        子步骤 2/3：配置所选后端的连接参数。
+      </Typography>
+
+      {selectedBackend === 'openclaw' ? (
+        <Stack spacing={1}>
+          <TextField
+            label="OpenClaw Base URL"
+            value={openClawSettings.baseUrl || ''}
+            onChange={(event) => onOpenClawSettingChange?.('baseUrl', event.target.value)}
+            placeholder="http://127.0.0.1:18789"
+            fullWidth
+          />
+          <TextField
+            label="Agent ID"
+            value={openClawSettings.agentId || ''}
+            onChange={(event) => onOpenClawSettingChange?.('agentId', event.target.value)}
+            placeholder="main"
+            fullWidth
+          />
+          <TextField
+            label="Token"
+            value={openClawSettings.token || ''}
+            onChange={(event) => onOpenClawSettingChange?.('token', event.target.value)}
+            type="password"
+            autoComplete="off"
+            fullWidth
+          />
+        </Stack>
+      ) : (
+        <Stack spacing={1}>
+          <TextField
+            label="Workspace"
+            value={nanobotSettings.workspace || ''}
+            onChange={(event) => onNanobotSettingChange?.('workspace', event.target.value)}
+            fullWidth
+          />
+          <Button size="small" variant="outlined" onClick={() => onPickNanobotWorkspace?.()}>
+            选择 Workspace 目录
+          </Button>
+          <TextField
+            label="Provider"
+            value={nanobotSettings.provider || ''}
+            onChange={(event) => onNanobotSettingChange?.('provider', event.target.value)}
+            fullWidth
+          />
+          <TextField
+            label="Model"
+            value={nanobotSettings.model || ''}
+            onChange={(event) => onNanobotSettingChange?.('model', event.target.value)}
+            fullWidth
+          />
+          <TextField
+            label="API Base"
+            value={nanobotSettings.apiBase || ''}
+            onChange={(event) => onNanobotSettingChange?.('apiBase', event.target.value)}
+            placeholder="可选"
+            fullWidth
+          />
+          <TextField
+            label="API Key"
+            value={nanobotSettings.apiKey || ''}
+            onChange={(event) => onNanobotSettingChange?.('apiKey', event.target.value)}
+            type="password"
+            autoComplete="off"
+            fullWidth
+          />
+        </Stack>
+      )}
+    </Stack>
+  );
+
+  const renderBackendEnableAndTestSubStep = () => {
+    if (selectedBackend !== 'nanobot') {
+      return (
+        <Stack spacing={1.5}>
+          <Typography variant="body2" color="text.secondary">
+            子步骤 3/3：仅 Nanobot 需要启用开关与连接测试。
+          </Typography>
+          <Alert severity="info">
+            当前已选择 OpenClaw，可直接进入下一步。
+          </Alert>
+        </Stack>
+      );
+    }
+
+    const testDisabled = settingsSaving || settingsTesting || !nanobotSettings.enabled;
 
     return (
       <Stack spacing={1.5}>
         <Typography variant="body2" color="text.secondary">
-          第一步先配置推理后端。你可以随时跳过，稍后在设置里继续。
+          子步骤 3/3：确认是否启用 Nanobot，并执行连接测试（可用性与延迟）。
         </Typography>
 
         <TextField
           select
-          label="推理后端"
-          value={selectedBackend}
-          onChange={(event) => onChatBackendChange?.(event.target.value)}
+          label="启用 Nanobot"
+          value={nanobotSettings.enabled ? 'enabled' : 'disabled'}
+          onChange={(event) => onNanobotSettingChange?.('enabled', event.target.value === 'enabled')}
           fullWidth
         >
-          <MenuItem value="openclaw">OpenClaw</MenuItem>
-          <MenuItem value="nanobot">Nanobot</MenuItem>
+          <MenuItem value="enabled">启用</MenuItem>
+          <MenuItem value="disabled">禁用</MenuItem>
         </TextField>
 
-        {selectedBackend === 'openclaw' && (
-          <Stack spacing={1}>
-            <TextField
-              label="OpenClaw Base URL"
-              value={openClawSettings.baseUrl || ''}
-              onChange={(event) => onOpenClawSettingChange?.('baseUrl', event.target.value)}
-              placeholder="http://127.0.0.1:18789"
-              fullWidth
-            />
-            <TextField
-              label="Agent ID"
-              value={openClawSettings.agentId || ''}
-              onChange={(event) => onOpenClawSettingChange?.('agentId', event.target.value)}
-              placeholder="main"
-              fullWidth
-            />
-            <TextField
-              label="Token"
-              value={openClawSettings.token || ''}
-              onChange={(event) => onOpenClawSettingChange?.('token', event.target.value)}
-              type="password"
-              autoComplete="off"
-              fullWidth
-            />
-          </Stack>
-        )}
-
-        {selectedBackend === 'nanobot' && (
-          <Stack spacing={1}>
-            <Alert severity={nanobotRuntimeStatus.installed ? 'success' : 'warning'}>
-              {nanobotRuntimeStatus.installed ? 'Nanobot 运行时已安装。' : '未安装 Nanobot 运行时。'}
-            </Alert>
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={nanobotRuntimeInstalling}
-              onClick={() => onInstallNanobotRuntime?.()}
-            >
-              {nanobotRuntimeInstalling ? '下载中...' : '下载/更新 Nanobot 运行时'}
-            </Button>
-            <TextField
-              select
-              label="启用 Nanobot"
-              value={nanobotSettings.enabled ? 'enabled' : 'disabled'}
-              onChange={(event) => onNanobotSettingChange?.('enabled', event.target.value === 'enabled')}
-              fullWidth
-            >
-              <MenuItem value="enabled">启用</MenuItem>
-              <MenuItem value="disabled">禁用</MenuItem>
-            </TextField>
-            <TextField
-              label="Workspace"
-              value={nanobotSettings.workspace || ''}
-              onChange={(event) => onNanobotSettingChange?.('workspace', event.target.value)}
-              fullWidth
-            />
-            <Button size="small" variant="outlined" onClick={() => onPickNanobotWorkspace?.()}>
-              选择 Workspace 目录
-            </Button>
-            <TextField
-              label="Provider"
-              value={nanobotSettings.provider || ''}
-              onChange={(event) => onNanobotSettingChange?.('provider', event.target.value)}
-              fullWidth
-            />
-            <TextField
-              label="Model"
-              value={nanobotSettings.model || ''}
-              onChange={(event) => onNanobotSettingChange?.('model', event.target.value)}
-              fullWidth
-            />
-            <TextField
-              label="API Base"
-              value={nanobotSettings.apiBase || ''}
-              onChange={(event) => onNanobotSettingChange?.('apiBase', event.target.value)}
-              placeholder="可选"
-              fullWidth
-            />
-            <TextField
-              label="API Key"
-              value={nanobotSettings.apiKey || ''}
-              onChange={(event) => onNanobotSettingChange?.('apiKey', event.target.value)}
-              type="password"
-              autoComplete="off"
-              fullWidth
-            />
-          </Stack>
-        )}
+        <Alert severity={nanobotRuntimeStatus.installed ? 'success' : 'warning'}>
+          {nanobotRuntimeStatus.installed ? 'Nanobot 运行时已就绪。' : 'Nanobot 运行时尚未安装，连接测试可能失败。'}
+        </Alert>
 
         <Stack direction="row" spacing={1}>
           <Button variant="contained" disabled={testDisabled} onClick={() => onTestChatBackendSettings?.()}>
             {settingsTesting ? '测试中...' : '测试后端连接'}
           </Button>
         </Stack>
+      </Stack>
+    );
+  };
 
-        {!!settingsFeedback && <Alert severity="success">{settingsFeedback}</Alert>}
-        {!!settingsError && <Alert severity="warning">{settingsError}</Alert>}
+  const renderBackendStep = () => {
+    return (
+      <Stack spacing={1.5}>
+        <Typography variant="body2" color="text.secondary">
+          第一步先配置推理后端。你可以随时跳过，稍后在设置里继续。
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {`当前子步骤：${backendSubStep + 1}/${BACKEND_SUB_STEP_LABELS.length} · ${BACKEND_SUB_STEP_LABELS[backendSubStep]}`}
+        </Typography>
+
+        {backendSubStep === 0 && renderBackendSourceSubStep()}
+        {backendSubStep === 1 && renderBackendConfigSubStep()}
+        {backendSubStep === 2 && renderBackendEnableAndTestSubStep()}
       </Stack>
     );
   };
@@ -1207,6 +1407,11 @@ export default function FirstRunOnboardingDialog({
     return null;
   }
 
+  const skipButtonText = activeStep === 0 && nanobotRuntimeDownloading
+    ? '跳过且后台下载'
+    : 'Skip this step';
+  const backDisabled = (activeStep === 0 && backendSubStep === 0) || isBusy;
+
   return (
     <Dialog open={open} fullWidth maxWidth="sm" disableEscapeKeyDown>
       <DialogTitle>首次使用引导</DialogTitle>
@@ -1236,15 +1441,17 @@ export default function FirstRunOnboardingDialog({
             </Typography>
           )}
 
+          {!!settingsFeedback && <Alert severity="success">{settingsFeedback}</Alert>}
+          {!!settingsError && <Alert severity="warning">{settingsError}</Alert>}
           {!!voiceFeedback && <Alert severity="success">{voiceFeedback}</Alert>}
           {!!voiceError && <Alert severity="warning">{voiceError}</Alert>}
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={() => { void handleSkipStep(); }} disabled={isBusy}>
-          Skip this step
+          {skipButtonText}
         </Button>
-        <Button onClick={handleBack} disabled={activeStep === 0 || isBusy}>上一步</Button>
+        <Button onClick={handleBack} disabled={backDisabled}>上一步</Button>
         <Button onClick={handleNext} variant="contained" disabled={isBusy}>
           {activeStep >= STEP_LABELS.length - 1 ? '完成引导' : '下一步'}
         </Button>

@@ -135,6 +135,7 @@ function AppContent({ desktopMode }) {
 
   const normalizeError = useCallback((error) => normalizeErrorMessage(error, t), [t]);
   const {
+    taskMap,
     activeTask,
     dialogOpen: downloadDialogOpen,
     detailsOpen: downloadDetailsOpen,
@@ -266,6 +267,7 @@ function AppContent({ desktopMode }) {
         taskId,
         title: taskTitle,
         payload,
+        suppressAutoOpen: firstRunOnboardingOpen,
       });
     });
 
@@ -274,6 +276,7 @@ function AppContent({ desktopMode }) {
         taskId: 'nanobot-runtime',
         title: t('download.nanobotRuntimeTitle'),
         payload,
+        suppressAutoOpen: firstRunOnboardingOpen,
       });
     });
     const offNanobotDebugLog = desktopBridge.nanobotDebug.onLog((payload = {}) => {
@@ -298,7 +301,7 @@ function AppContent({ desktopMode }) {
       offNanobotRuntimeProgress?.();
       offNanobotDebugLog?.();
     };
-  }, [desktopMode, handleDownloadProgress, t]);
+  }, [desktopMode, firstRunOnboardingOpen, handleDownloadProgress, t]);
 
   useEffect(() => {
     if (!desktopMode) {
@@ -415,6 +418,14 @@ function AppContent({ desktopMode }) {
     openDownloadTask('nanobot-runtime');
     await onInstallNanobotRuntime();
   }, [ensureDownloadTask, onInstallNanobotRuntime, openDownloadTask, t]);
+
+  const handleInstallNanobotRuntimeFromOnboarding = useCallback(async () => {
+    ensureDownloadTask({
+      taskId: 'nanobot-runtime',
+      title: t('download.nanobotRuntimeTitle'),
+    });
+    await onInstallNanobotRuntime();
+  }, [ensureDownloadTask, onInstallNanobotRuntime, t]);
 
   const handleFinishFirstRunOnboarding = useCallback(async () => {
     try {
@@ -829,12 +840,12 @@ function AppContent({ desktopMode }) {
         onTestChatBackendSettings={onTestChatBackendSettings}
         nanobotRuntimeStatus={nanobotRuntimeStatus}
         nanobotRuntimeInstalling={nanobotRuntimeInstalling}
-        onInstallNanobotRuntime={handleInstallNanobotRuntime}
-        onOpenDownloadCenter={openDownloadTask}
+        nanobotRuntimeDownloadTask={taskMap['nanobot-runtime'] || null}
+        onInstallNanobotRuntime={handleInstallNanobotRuntimeFromOnboarding}
         onFinish={handleFinishFirstRunOnboarding}
       />
       <UnifiedDownloadDialog
-        open={downloadDialogOpen}
+        open={!firstRunOnboardingOpen && downloadDialogOpen}
         task={activeTask}
         detailsOpen={downloadDetailsOpen}
         onToggleDetails={() => setDownloadDetailsOpen((prev) => !prev)}

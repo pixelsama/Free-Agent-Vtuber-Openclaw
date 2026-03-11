@@ -13,9 +13,23 @@ function createTask(id, title = '') {
     fileTotalBytes: 0,
     downloadSpeedBytesPerSec: 0,
     estimatedRemainingSeconds: null,
+    startedAtMs: 0,
     logs: [],
     updatedAt: Date.now(),
   };
+}
+
+function decodeDisplayText(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text || !/%[0-9a-f]{2}/i.test(text)) {
+    return text;
+  }
+
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
 }
 
 function normalizePhase(value) {
@@ -78,7 +92,7 @@ export function useUnifiedDownloader() {
   }, [activeTaskId, taskMap]);
 
   const appendLog = useCallback((taskId, message, dedupeKey = '') => {
-    const text = typeof message === 'string' ? message.trim() : '';
+    const text = decodeDisplayText(message);
     if (!taskId || !text) {
       return;
     }
@@ -110,15 +124,16 @@ export function useUnifiedDownloader() {
     }));
   }, [upsertTask]);
 
-  const handleProgress = useCallback(({ taskId, title = '', payload = {} }) => {
+  const handleProgress = useCallback(({ taskId, title = '', payload = {}, suppressAutoOpen = false }) => {
     if (!taskId) {
       return;
     }
 
     const phase = normalizePhase(payload?.phase);
-    const currentFile = typeof payload?.currentFile === 'string' ? payload.currentFile : '';
+    const currentFile = decodeDisplayText(payload?.currentFile);
     const completedTasks = Number.isFinite(payload?.completedTasks) ? payload.completedTasks : 0;
     const totalTasks = Number.isFinite(payload?.totalTasks) ? payload.totalTasks : 0;
+    const nowMs = Date.now();
 
     upsertTask(taskId, (current) => ({
       ...current,
@@ -137,8 +152,12 @@ export function useUnifiedDownloader() {
       estimatedRemainingSeconds: Number.isFinite(payload?.estimatedRemainingSeconds)
         ? payload.estimatedRemainingSeconds
         : null,
+      startedAtMs:
+        phase === 'started'
+          ? nowMs
+          : (Number.isFinite(current.startedAtMs) && current.startedAtMs > 0 ? current.startedAtMs : nowMs),
       logs: phase === 'started' ? [] : current.logs,
-      updatedAt: Date.now(),
+      updatedAt: nowMs,
     }));
 
     if (phase === 'started') {
@@ -157,7 +176,7 @@ export function useUnifiedDownloader() {
     }
 
     const isMuted = mutedTaskIdsRef.current.has(taskId);
-    if (!isMuted && (!dialogOpen || activeTaskId !== taskId)) {
+    if (!suppressAutoOpen && !isMuted && (!dialogOpen || activeTaskId !== taskId)) {
       openTask(taskId);
     }
   }, [activeTaskId, appendLog, dialogOpen, openTask, upsertTask]);
