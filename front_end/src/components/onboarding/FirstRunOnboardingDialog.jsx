@@ -291,7 +291,7 @@ function isDownloadRunningPhase(phase) {
 }
 
 const STEP_LABELS = ['推理后端', 'ASR', 'TTS'];
-const BACKEND_SUB_STEP_LABELS = ['选择后端', '配置后端', '启用与测试'];
+const BACKEND_SUB_STEP_COUNT = 3;
 
 export default function FirstRunOnboardingDialog({
   open = false,
@@ -887,8 +887,8 @@ export default function FirstRunOnboardingDialog({
   }, [activeStep, onFinish]);
 
   const handleNext = useCallback(async () => {
-    if (activeStep === 0 && backendSubStep < BACKEND_SUB_STEP_LABELS.length - 1) {
-      setBackendSubStep((current) => Math.min(BACKEND_SUB_STEP_LABELS.length - 1, current + 1));
+    if (activeStep === 0 && backendSubStep < BACKEND_SUB_STEP_COUNT - 1) {
+      setBackendSubStep((current) => Math.min(BACKEND_SUB_STEP_COUNT - 1, current + 1));
       return;
     }
 
@@ -1006,10 +1006,6 @@ export default function FirstRunOnboardingDialog({
 
   const renderBackendSourceSubStep = () => (
     <Stack spacing={1.5}>
-      <Typography variant="body2" color="text.secondary">
-        子步骤 1/3：先选择推理后端。如果选择 Nanobot，可以直接下载运行时。
-      </Typography>
-
       <TextField
         select
         label="推理后端"
@@ -1042,10 +1038,6 @@ export default function FirstRunOnboardingDialog({
 
   const renderBackendConfigSubStep = () => (
     <Stack spacing={1.5}>
-      <Typography variant="body2" color="text.secondary">
-        子步骤 2/3：配置所选后端的连接参数。
-      </Typography>
-
       {selectedBackend === 'openclaw' ? (
         <Stack spacing={1}>
           <TextField
@@ -1118,9 +1110,6 @@ export default function FirstRunOnboardingDialog({
     if (selectedBackend !== 'nanobot') {
       return (
         <Stack spacing={1.5}>
-          <Typography variant="body2" color="text.secondary">
-            子步骤 3/3：仅 Nanobot 需要启用开关与连接测试。
-          </Typography>
           <Alert severity="info">
             当前已选择 OpenClaw，可直接进入下一步。
           </Alert>
@@ -1132,10 +1121,6 @@ export default function FirstRunOnboardingDialog({
 
     return (
       <Stack spacing={1.5}>
-        <Typography variant="body2" color="text.secondary">
-          子步骤 3/3：确认是否启用 Nanobot，并执行连接测试（可用性与延迟）。
-        </Typography>
-
         <TextField
           select
           label="启用 Nanobot"
@@ -1165,9 +1150,6 @@ export default function FirstRunOnboardingDialog({
       <Stack spacing={1.5}>
         <Typography variant="body2" color="text.secondary">
           第一步先配置推理后端。你可以随时跳过，稍后在设置里继续。
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {`当前子步骤：${backendSubStep + 1}/${BACKEND_SUB_STEP_LABELS.length} · ${BACKEND_SUB_STEP_LABELS[backendSubStep]}`}
         </Typography>
 
         {backendSubStep === 0 && renderBackendSourceSubStep()}
