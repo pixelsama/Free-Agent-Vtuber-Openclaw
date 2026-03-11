@@ -23,7 +23,7 @@ const MAX_REDIRECTS = 5;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 const EXEC_MAX_BUFFER = 20 * 1024 * 1024;
-const DEFAULT_NANOBOT_ARCHIVE_URL = 'https://codeload.github.com/HKUDS/nanobot/tar.gz/refs/heads/main';
+const DEFAULT_NANOBOT_ARCHIVE_URL = 'https://codeload.github.com/HKUDS/nanobot/tar.gz/refs/tags/v0.1.4.post4';
 
 function sanitizeText(value) {
   return typeof value === 'string' ? value.trim() : '';

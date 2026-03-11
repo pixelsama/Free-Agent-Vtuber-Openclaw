@@ -61,6 +61,7 @@ test('nanobot runtime manager does not resolve external repo path from env', asy
   assert.equal(status.repoPath, '');
   assert.equal(status.source, '');
   assert.equal(status.pythonExecutable, '/usr/bin/python3');
+  assert.equal(status.archiveUrl, 'https://codeload.github.com/HKUDS/nanobot/tar.gz/refs/tags/v0.1.4.post4');
 });
 
 test('nanobot runtime manager installs runtime into app data', async () => {
