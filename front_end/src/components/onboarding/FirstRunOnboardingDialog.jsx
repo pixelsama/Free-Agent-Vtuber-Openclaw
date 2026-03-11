@@ -18,6 +18,7 @@ import {
   Typography,
 } from '@mui/material';
 import { desktopBridge } from '../../services/desktopBridge.js';
+import { useI18n, LANGUAGE_EN_US, LANGUAGE_ZH_CN } from '../../i18n/I18nContext.jsx';
 
 const ASR_TEST_RECORD_MS = 3000;
 const ASR_TEST_SAMPLE_RATE = 16000;
@@ -65,28 +66,28 @@ function isCloudNoKeyCatalogItem(item = {}) {
   return getCatalogSourceType(item) === 'cloud-no-key';
 }
 
-function getAsrTestStatusText(phase) {
+function getAsrTestStatusText(t, phase) {
   if (phase === 'warming') {
-    return 'ASR 模型预热中...';
+    return t('onboarding.asr.test.warming');
   }
   if (phase === 'recording') {
-    return 'ASR 测试中（录音 3 秒）...';
+    return t('onboarding.asr.test.recording');
   }
   if (phase === 'transcribing') {
-    return 'ASR 正在识别录音...';
+    return t('onboarding.asr.test.transcribing');
   }
-  return 'ASR 延迟测试';
+  return t('onboarding.asr.test.action');
 }
 
-function getAsrTestProgressMessage(phase) {
+function getAsrTestProgressMessage(t, phase) {
   if (phase === 'warming') {
-    return '正在预热 ASR 模型。预热完成后会自动开始录音。';
+    return t('onboarding.asr.test.warmingHint');
   }
   if (phase === 'recording') {
-    return '正在录音 3 秒，请朗读测试提示词。';
+    return t('onboarding.asr.test.recordingHint');
   }
   if (phase === 'transcribing') {
-    return '录音结束，正在执行 ASR 识别。';
+    return t('onboarding.asr.test.transcribingHint');
   }
   return '';
 }
@@ -156,14 +157,18 @@ function int16ToUint8(int16Samples) {
   return out;
 }
 
-async function captureAsrTestPcm({ durationMs = ASR_TEST_RECORD_MS, sampleRate = ASR_TEST_SAMPLE_RATE } = {}) {
+async function captureAsrTestPcm({
+  durationMs = ASR_TEST_RECORD_MS,
+  sampleRate = ASR_TEST_SAMPLE_RATE,
+  messages = {},
+} = {}) {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-    throw new Error('当前环境不支持麦克风采集。');
+    throw new Error(messages.microphoneUnsupported || 'Microphone capture is unavailable.');
   }
 
   const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextCtor) {
-    throw new Error('当前环境不支持 AudioContext。');
+    throw new Error(messages.audioContextUnsupported || 'AudioContext is unavailable.');
   }
 
   let stream = null;
@@ -234,7 +239,7 @@ async function captureAsrTestPcm({ durationMs = ASR_TEST_RECORD_MS, sampleRate =
   const pcm = downsampleFloat32(merged, audioContext?.sampleRate || 48000, sampleRate);
   const bytes = int16ToUint8(pcm);
   if (!bytes.length) {
-    throw new Error('录音为空，请重试并确认麦克风输入。');
+    throw new Error(messages.emptyRecording || 'Recording is empty.');
   }
 
   return bytes;
@@ -290,8 +295,8 @@ function isDownloadRunningPhase(phase) {
   return Boolean(value && value !== 'idle' && value !== 'completed' && value !== 'failed');
 }
 
-const STEP_LABELS = ['推理后端', 'ASR', 'TTS'];
 const BACKEND_SUB_STEP_COUNT = 3;
+const TOTAL_STEPS = 4;
 
 export default function FirstRunOnboardingDialog({
   open = false,
@@ -313,6 +318,7 @@ export default function FirstRunOnboardingDialog({
   onInstallNanobotRuntime,
   onFinish,
 }) {
+  const { t, language, setLanguage } = useI18n();
   const mountedRef = useRef(true);
   const [activeStep, setActiveStep] = useState(0);
   const [backendSubStep, setBackendSubStep] = useState(0);
@@ -346,6 +352,15 @@ export default function FirstRunOnboardingDialog({
   const [ttsTesting, setTtsTesting] = useState(false);
   const [asrResult, setAsrResult] = useState(null);
   const [ttsResult, setTtsResult] = useState(null);
+  const stepLabels = useMemo(
+    () => [
+      t('language.label'),
+      t('onboarding.step.backend'),
+      t('onboarding.step.asr'),
+      t('onboarding.step.tts'),
+    ],
+    [t],
+  );
 
   const selectedBackend = chatBackendSettings?.chatBackend === 'nanobot' ? 'nanobot' : 'openclaw';
   const openClawSettings = chatBackendSettings?.openclaw || {};
@@ -490,14 +505,14 @@ export default function FirstRunOnboardingDialog({
       setSelectedTtsCatalogId(selectedTtsBundle?.catalogId || firstTtsCatalog?.id || '');
     } catch (error) {
       if (mountedRef.current) {
-        setVoiceError(error?.message || '加载语音配置失败。');
+        setVoiceError(error?.message || t('onboarding.voice.loadFailed'));
       }
     } finally {
       if (mountedRef.current) {
         setVoiceLoading(false);
       }
     }
-  }, [desktopMode]);
+  }, [desktopMode, t]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -511,6 +526,8 @@ export default function FirstRunOnboardingDialog({
       setActiveStep(0);
       setBackendSubStep(0);
       setBackendDownloadDetailsOpen(false);
+      setAsrDownloadDetailsOpen(false);
+      setTtsDownloadDetailsOpen(false);
       return;
     }
     void loadVoiceContext();
@@ -525,7 +542,7 @@ export default function FirstRunOnboardingDialog({
         return true;
       } catch (error) {
         if (mountedRef.current) {
-          setVoiceError(error?.message || '保存语音配置失败。');
+          setVoiceError(error?.message || t('onboarding.voice.saveFailed'));
         }
         return false;
       } finally {
@@ -534,7 +551,7 @@ export default function FirstRunOnboardingDialog({
         }
       }
     },
-    [],
+    [t],
   );
 
   const applyAsrConfig = useCallback(async () => {
@@ -542,14 +559,14 @@ export default function FirstRunOnboardingDialog({
     setVoiceFeedback('');
 
     if (asrSource === 'skip') {
-      setVoiceFeedback('已跳过 ASR 配置。');
+      setVoiceFeedback(t('onboarding.asr.skipped'));
       return true;
     }
 
     if (asrSource === 'cloud') {
       const hasApiKey = Boolean((dashscopeSettings.apiKey || '').trim()) || dashscopeApiKeySaved;
       if (!hasApiKey) {
-        setVoiceError('请填写 DashScope API Key。');
+        setVoiceError(t('onboarding.dashscope.apiKeyRequired'));
         return false;
       }
 
@@ -572,11 +589,11 @@ export default function FirstRunOnboardingDialog({
 
       const selected = await desktopBridge.voiceModels.select({ asrBundleId: '' });
       if (!selected?.ok) {
-        setVoiceError(selected?.error?.message || '切换 ASR 至云端失败。');
+        setVoiceError(selected?.error?.message || t('onboarding.asr.cloudApplyFailed'));
         return false;
       }
       setModelBundles(Array.isArray(selected?.bundles) ? selected.bundles : []);
-      setVoiceFeedback('ASR 云端配置已生效。');
+      setVoiceFeedback(t('onboarding.asr.cloudApplied'));
       return true;
     }
 
@@ -587,7 +604,7 @@ export default function FirstRunOnboardingDialog({
         capability: 'asr',
       });
       if (!installedBundle?.id) {
-        setVoiceError('请先下载所选 ASR 本地模型。');
+        setVoiceError(t('onboarding.asr.downloadRequired'));
         return false;
       }
 
@@ -604,30 +621,30 @@ export default function FirstRunOnboardingDialog({
         asrBundleId: installedBundle.id,
       });
       if (!selected?.ok) {
-        setVoiceError(selected?.error?.message || '切换 ASR 本地模型失败。');
+        setVoiceError(selected?.error?.message || t('onboarding.asr.localApplyFailed'));
         return false;
       }
       setModelBundles(Array.isArray(selected?.bundles) ? selected.bundles : []);
-      setVoiceFeedback('ASR 本地模型已生效。');
+      setVoiceFeedback(t('onboarding.asr.localApplied'));
       return true;
     }
 
     return false;
-  }, [asrSource, dashscopeApiKeySaved, dashscopeSettings, modelBundles, saveVoiceSettings, selectedAsrCatalogId]);
+  }, [asrSource, dashscopeApiKeySaved, dashscopeSettings, modelBundles, saveVoiceSettings, selectedAsrCatalogId, t]);
 
   const applyTtsConfig = useCallback(async () => {
     setVoiceError('');
     setVoiceFeedback('');
 
     if (ttsSource === 'skip') {
-      setVoiceFeedback('已跳过 TTS 配置。');
+      setVoiceFeedback(t('onboarding.tts.skipped'));
       return true;
     }
 
     if (ttsSource === 'cloud') {
       const hasApiKey = Boolean((dashscopeSettings.apiKey || '').trim()) || dashscopeApiKeySaved;
       if (!hasApiKey) {
-        setVoiceError('请填写 DashScope API Key。');
+        setVoiceError(t('onboarding.dashscope.apiKeyRequired'));
         return false;
       }
 
@@ -653,11 +670,11 @@ export default function FirstRunOnboardingDialog({
 
       const selected = await desktopBridge.voiceModels.select({ ttsBundleId: '' });
       if (!selected?.ok) {
-        setVoiceError(selected?.error?.message || '切换 TTS 至云端失败。');
+        setVoiceError(selected?.error?.message || t('onboarding.tts.cloudApplyFailed'));
         return false;
       }
       setModelBundles(Array.isArray(selected?.bundles) ? selected.bundles : []);
-      setVoiceFeedback('TTS 云端配置已生效。');
+      setVoiceFeedback(t('onboarding.tts.cloudApplied'));
       return true;
     }
 
@@ -668,7 +685,7 @@ export default function FirstRunOnboardingDialog({
         capability: 'tts',
       });
       if (!installedBundle?.id) {
-        setVoiceError(ttsSource === 'cloud-no-key' ? '请先准备所选云端 TTS 运行时。' : '请先下载所选 TTS 本地模型。');
+        setVoiceError(ttsSource === 'cloud-no-key' ? t('onboarding.tts.cloudNoKeyPrepareRequired') : t('onboarding.tts.downloadRequired'));
         return false;
       }
 
@@ -687,21 +704,21 @@ export default function FirstRunOnboardingDialog({
       if (!selected?.ok) {
         setVoiceError(
           selected?.error?.message
-            || (ttsSource === 'cloud-no-key' ? '切换 TTS 至云端免 Key 语音失败。' : '切换 TTS 本地模型失败。'),
+            || (ttsSource === 'cloud-no-key' ? t('onboarding.tts.cloudNoKeyApplyFailed') : t('onboarding.tts.localApplyFailed')),
         );
         return false;
       }
       setModelBundles(Array.isArray(selected?.bundles) ? selected.bundles : []);
-      setVoiceFeedback(ttsSource === 'cloud-no-key' ? 'TTS 云端免 Key 语音已生效。' : 'TTS 本地模型已生效。');
+      setVoiceFeedback(ttsSource === 'cloud-no-key' ? t('onboarding.tts.cloudNoKeyApplied') : t('onboarding.tts.localApplied'));
       return true;
     }
 
     return false;
-  }, [dashscopeApiKeySaved, dashscopeSettings, modelBundles, saveVoiceSettings, selectedTtsCatalogId, ttsSource]);
+  }, [dashscopeApiKeySaved, dashscopeSettings, modelBundles, saveVoiceSettings, selectedTtsCatalogId, ttsSource, t]);
 
   const handleInstallAsr = useCallback(async () => {
     if (!selectedAsrCatalogId) {
-      setVoiceError('请先选择一个 ASR 本地模型。');
+      setVoiceError(t('onboarding.asr.selectModel'));
       return;
     }
 
@@ -714,24 +731,24 @@ export default function FirstRunOnboardingDialog({
         installTts: false,
       });
       if (!result?.ok) {
-        setVoiceError(result?.error?.message || '下载 ASR 模型失败。');
+        setVoiceError(result?.error?.message || t('onboarding.asr.downloadFailed'));
         return;
       }
-      setVoiceFeedback('ASR 本地模型下载完成。');
+      setVoiceFeedback(t('onboarding.asr.downloadCompleted'));
       await loadVoiceContext();
       setAsrSource('local');
     } catch (error) {
-      setVoiceError(error?.message || '下载 ASR 模型失败。');
+      setVoiceError(error?.message || t('onboarding.asr.downloadFailed'));
     } finally {
       if (mountedRef.current) {
         setIsInstallingAsr(false);
       }
     }
-  }, [loadVoiceContext, selectedAsrCatalogId]);
+  }, [loadVoiceContext, selectedAsrCatalogId, t]);
 
   const handleInstallTts = useCallback(async () => {
     if (!selectedTtsCatalogId) {
-      setVoiceError('请先选择一个 TTS 选项。');
+      setVoiceError(t('onboarding.tts.selectOption'));
       return;
     }
 
@@ -747,20 +764,20 @@ export default function FirstRunOnboardingDialog({
         installTts: true,
       });
       if (!result?.ok) {
-        setVoiceError(result?.error?.message || (isCloudNoKey ? '准备云端 TTS 运行时失败。' : '下载 TTS 模型失败。'));
+        setVoiceError(result?.error?.message || (isCloudNoKey ? t('onboarding.tts.cloudNoKeyPrepareFailed') : t('onboarding.tts.downloadFailed')));
         return;
       }
-      setVoiceFeedback(isCloudNoKey ? '云端 TTS 运行时准备完成。' : 'TTS 本地模型下载完成。');
+      setVoiceFeedback(isCloudNoKey ? t('onboarding.tts.cloudNoKeyPrepared') : t('onboarding.tts.downloadCompleted'));
       await loadVoiceContext();
       setTtsSource(isCloudNoKey ? 'cloud-no-key' : 'local');
     } catch (error) {
-      setVoiceError(error?.message || (isCloudNoKey ? '准备云端 TTS 运行时失败。' : '下载 TTS 模型失败。'));
+      setVoiceError(error?.message || (isCloudNoKey ? t('onboarding.tts.cloudNoKeyPrepareFailed') : t('onboarding.tts.downloadFailed')));
     } finally {
       if (mountedRef.current) {
         setIsInstallingTts(false);
       }
     }
-  }, [loadVoiceContext, selectedTtsCatalogId, ttsCatalogItems]);
+  }, [loadVoiceContext, selectedTtsCatalogId, ttsCatalogItems, t]);
 
   const handleRunAsrTest = useCallback(async () => {
     if (asrTesting || ttsTesting) {
@@ -785,7 +802,7 @@ export default function FirstRunOnboardingDialog({
         return;
       }
       if (!warmupResult?.ok) {
-        setVoiceError(warmupResult?.error?.message || warmupResult?.reason || 'ASR 预热失败。');
+        setVoiceError(warmupResult?.error?.message || warmupResult?.reason || t('onboarding.asr.warmupFailed'));
         return;
       }
 
@@ -793,6 +810,11 @@ export default function FirstRunOnboardingDialog({
       const pcmChunk = await captureAsrTestPcm({
         durationMs: ASR_TEST_RECORD_MS,
         sampleRate: ASR_TEST_SAMPLE_RATE,
+        messages: {
+          microphoneUnsupported: t('onboarding.asr.microphoneUnsupported'),
+          audioContextUnsupported: t('onboarding.asr.audioContextUnsupported'),
+          emptyRecording: t('onboarding.asr.emptyRecording'),
+        },
       });
 
       if (!mountedRef.current) {
@@ -811,7 +833,7 @@ export default function FirstRunOnboardingDialog({
       }
 
       if (!result?.ok) {
-        setVoiceError(result?.error?.message || result?.reason || 'ASR 测试失败。');
+        setVoiceError(result?.error?.message || result?.reason || t('onboarding.asr.testFailed'));
         return;
       }
 
@@ -821,7 +843,7 @@ export default function FirstRunOnboardingDialog({
       });
     } catch (error) {
       if (mountedRef.current) {
-        setVoiceError(error?.message || 'ASR 测试失败。');
+        setVoiceError(error?.message || t('onboarding.asr.testFailed'));
       }
     } finally {
       if (mountedRef.current) {
@@ -829,7 +851,7 @@ export default function FirstRunOnboardingDialog({
         setAsrTesting(false);
       }
     }
-  }, [applyAsrConfig, asrPrompt, asrTesting, ttsTesting]);
+  }, [applyAsrConfig, asrPrompt, asrTesting, ttsTesting, t]);
 
   const handleRunTtsTest = useCallback(async () => {
     if (asrTesting || ttsTesting) {
@@ -838,7 +860,7 @@ export default function FirstRunOnboardingDialog({
 
     const text = typeof ttsText === 'string' ? ttsText.trim() : '';
     if (!text) {
-      setVoiceError('请输入 TTS 测试文本。');
+      setVoiceError(t('onboarding.tts.testTextRequired'));
       return;
     }
 
@@ -860,7 +882,7 @@ export default function FirstRunOnboardingDialog({
       }
 
       if (!result?.ok) {
-        setVoiceError(result?.error?.message || result?.reason || 'TTS 测试失败。');
+        setVoiceError(result?.error?.message || result?.reason || t('onboarding.tts.testFailed'));
         return;
       }
 
@@ -870,71 +892,83 @@ export default function FirstRunOnboardingDialog({
       });
     } catch (error) {
       if (mountedRef.current) {
-        setVoiceError(error?.message || 'TTS 测试失败。');
+        setVoiceError(error?.message || t('onboarding.tts.testFailed'));
       }
     } finally {
       if (mountedRef.current) {
         setTtsTesting(false);
       }
     }
-  }, [applyTtsConfig, asrTesting, ttsTesting, ttsText]);
+  }, [applyTtsConfig, asrTesting, ttsTesting, ttsText, t]);
 
   const handleSkipStep = useCallback(async () => {
     setVoiceError('');
     setVoiceFeedback('');
 
     if (activeStep === 0) {
-      setBackendSubStep(0);
       setActiveStep(1);
       return;
     }
 
-    if (activeStep === 1) {
-      setAsrSource('skip');
-    }
-    if (activeStep === 2) {
-      setTtsSource('skip');
-    }
-
-    if (activeStep >= STEP_LABELS.length - 1) {
-      await onFinish?.();
-      return;
-    }
-    setActiveStep((current) => Math.min(STEP_LABELS.length - 1, current + 1));
-  }, [activeStep, onFinish]);
-
-  const handleNext = useCallback(async () => {
-    if (activeStep === 0 && backendSubStep < BACKEND_SUB_STEP_COUNT - 1) {
+    if (activeStep === 1 && backendSubStep < BACKEND_SUB_STEP_COUNT - 1) {
       setBackendSubStep((current) => Math.min(BACKEND_SUB_STEP_COUNT - 1, current + 1));
       return;
     }
 
+    if (activeStep === 2) {
+      setAsrSource('skip');
+    }
+    if (activeStep === 3) {
+      setTtsSource('skip');
+    }
+
+    if (activeStep >= TOTAL_STEPS - 1) {
+      await onFinish?.();
+      return;
+    }
     if (activeStep === 1) {
+      setBackendSubStep(0);
+    }
+    setActiveStep((current) => Math.min(TOTAL_STEPS - 1, current + 1));
+  }, [activeStep, backendSubStep, onFinish]);
+
+  const handleNext = useCallback(async () => {
+    if (activeStep === 0) {
+      setActiveStep(1);
+      return;
+    }
+
+    if (activeStep === 1 && backendSubStep < BACKEND_SUB_STEP_COUNT - 1) {
+      setBackendSubStep((current) => Math.min(BACKEND_SUB_STEP_COUNT - 1, current + 1));
+      return;
+    }
+
+    if (activeStep === 2) {
       const ok = await applyAsrConfig();
       if (!ok) {
         return;
       }
     }
 
-    if (activeStep === 2) {
+    if (activeStep === 3) {
       const ok = await applyTtsConfig();
       if (!ok) {
         return;
       }
     }
 
-    if (activeStep >= STEP_LABELS.length - 1) {
+    if (activeStep >= TOTAL_STEPS - 1) {
       await onFinish?.();
       return;
     }
-    if (activeStep === 0) {
+    if (activeStep === 1) {
       setBackendSubStep(0);
     }
-    setActiveStep((current) => Math.min(STEP_LABELS.length - 1, current + 1));
+    setActiveStep((current) => Math.min(TOTAL_STEPS - 1, current + 1));
   }, [activeStep, applyAsrConfig, applyTtsConfig, backendSubStep, onFinish]);
 
   const handleBack = useCallback(() => {
-    if (activeStep === 0 && backendSubStep > 0) {
+    if (activeStep === 1 && backendSubStep > 0) {
       setBackendSubStep((current) => Math.max(0, current - 1));
       return;
     }
@@ -947,7 +981,7 @@ export default function FirstRunOnboardingDialog({
     }
 
     return renderInlineDownloadCard({
-      title: 'Nanobot 运行时下载与安装',
+      title: t('download.nanobotRuntimeTitle'),
       task: nanobotRuntimeDownloadTask,
       detailsOpen: backendDownloadDetailsOpen,
       onToggleDetails: () => setBackendDownloadDetailsOpen((current) => !current),
@@ -964,18 +998,18 @@ export default function FirstRunOnboardingDialog({
     const statusText =
       normalizedTask.currentFile
       || (phase === 'completed'
-        ? '任务完成。'
+        ? t('onboarding.download.completed')
         : phase === 'failed'
-          ? '任务失败。'
-          : '准备中...');
+          ? t('onboarding.download.failed')
+          : t('download.preparing'));
     const statsText =
       phase === 'completed'
-        ? '下载与安装已完成。'
+        ? t('onboarding.download.completedStats')
         : phase === 'failed'
-          ? '下载或安装未完成。'
+          ? t('onboarding.download.failedStats')
           : Number.isFinite(normalizedTask.fileTotalBytes) && normalizedTask.fileTotalBytes > 0
-            ? `${formatBytes(normalizedTask.fileDownloadedBytes || 0)} / ${formatBytes(normalizedTask.fileTotalBytes || 0)} · ${formatBytesPerSecond(normalizedTask.downloadSpeedBytesPerSec || 0)} · 预计剩余 ${formatEta(normalizedTask.estimatedRemainingSeconds)}`
-            : '下载数据同步中...';
+            ? `${formatBytes(normalizedTask.fileDownloadedBytes || 0)} / ${formatBytes(normalizedTask.fileTotalBytes || 0)} · ${formatBytesPerSecond(normalizedTask.downloadSpeedBytesPerSec || 0)} · ${t('download.eta')} ${formatEta(normalizedTask.estimatedRemainingSeconds)}`
+            : t('onboarding.download.waitingStats');
 
     return (
       <Stack
@@ -988,7 +1022,7 @@ export default function FirstRunOnboardingDialog({
           bgcolor: 'background.paper',
         }}
       >
-        <Typography variant="subtitle2">{title || '下载与安装'}</Typography>
+        <Typography variant="subtitle2">{title || t('download.defaultTitle')}</Typography>
         <LinearProgress
           variant={typeof normalizedTask.overallProgress === 'number' ? 'determinate' : 'indeterminate'}
           value={progressValue}
@@ -1005,7 +1039,7 @@ export default function FirstRunOnboardingDialog({
           sx={{ alignSelf: 'flex-end' }}
           onClick={onToggleDetails}
         >
-          {detailsOpen ? '隐藏详情' : '详情'}
+          {detailsOpen ? t('download.hideDetails') : t('download.showDetails')}
         </Button>
         <Collapse in={detailsOpen}>
           <Box
@@ -1023,7 +1057,7 @@ export default function FirstRunOnboardingDialog({
               wordBreak: 'break-word',
             }}
           >
-            {Array.isArray(normalizedTask.logs) && normalizedTask.logs.length ? normalizedTask.logs.join('\n') : '暂无日志'}
+            {Array.isArray(normalizedTask.logs) && normalizedTask.logs.length ? normalizedTask.logs.join('\n') : t('download.noLogs')}
           </Box>
         </Collapse>
       </Stack>
@@ -1034,19 +1068,19 @@ export default function FirstRunOnboardingDialog({
     <Stack spacing={1.5}>
       <TextField
         select
-        label="推理后端"
+        label={t('onboarding.backend.label')}
         value={selectedBackend}
         onChange={(event) => onChatBackendChange?.(event.target.value)}
         fullWidth
       >
-        <MenuItem value="openclaw">OpenClaw</MenuItem>
-        <MenuItem value="nanobot">Nanobot</MenuItem>
+        <MenuItem value="openclaw">{t('app.backend.openclaw')}</MenuItem>
+        <MenuItem value="nanobot">{t('app.backend.nanobot')}</MenuItem>
       </TextField>
 
       {selectedBackend === 'nanobot' && (
         <Stack spacing={1}>
           <Alert severity={nanobotRuntimeStatus.installed ? 'success' : 'warning'}>
-            {nanobotRuntimeStatus.installed ? 'Nanobot 运行时已安装。' : '未安装 Nanobot 运行时。'}
+            {nanobotRuntimeStatus.installed ? t('onboarding.backend.nanobotInstalled') : t('onboarding.backend.nanobotMissing')}
           </Alert>
           <Button
             variant="outlined"
@@ -1054,7 +1088,7 @@ export default function FirstRunOnboardingDialog({
             disabled={nanobotRuntimeInstalling}
             onClick={() => onInstallNanobotRuntime?.()}
           >
-            {nanobotRuntimeInstalling ? '下载中...' : '下载/更新 Nanobot 运行时'}
+            {nanobotRuntimeInstalling ? t('app.nanobotRuntimeInstalling') : t('onboarding.backend.downloadNanobot')}
           </Button>
           {renderNanobotDownloadCard()}
         </Stack>
@@ -1067,21 +1101,21 @@ export default function FirstRunOnboardingDialog({
       {selectedBackend === 'openclaw' ? (
         <Stack spacing={1}>
           <TextField
-            label="OpenClaw Base URL"
+            label={t('onboarding.backend.openclawBaseUrl')}
             value={openClawSettings.baseUrl || ''}
             onChange={(event) => onOpenClawSettingChange?.('baseUrl', event.target.value)}
             placeholder="http://127.0.0.1:18789"
             fullWidth
           />
           <TextField
-            label="Agent ID"
+            label={t('onboarding.backend.agentId')}
             value={openClawSettings.agentId || ''}
             onChange={(event) => onOpenClawSettingChange?.('agentId', event.target.value)}
             placeholder="main"
             fullWidth
           />
           <TextField
-            label="Token"
+            label={t('onboarding.backend.token')}
             value={openClawSettings.token || ''}
             onChange={(event) => onOpenClawSettingChange?.('token', event.target.value)}
             type="password"
@@ -1092,35 +1126,35 @@ export default function FirstRunOnboardingDialog({
       ) : (
         <Stack spacing={1}>
           <TextField
-            label="Workspace"
+            label={t('onboarding.backend.workspace')}
             value={nanobotSettings.workspace || ''}
             onChange={(event) => onNanobotSettingChange?.('workspace', event.target.value)}
             fullWidth
           />
           <Button size="small" variant="outlined" onClick={() => onPickNanobotWorkspace?.()}>
-            选择 Workspace 目录
+            {t('onboarding.backend.pickWorkspace')}
           </Button>
           <TextField
-            label="Provider"
+            label={t('onboarding.backend.provider')}
             value={nanobotSettings.provider || ''}
             onChange={(event) => onNanobotSettingChange?.('provider', event.target.value)}
             fullWidth
           />
           <TextField
-            label="Model"
+            label={t('onboarding.backend.model')}
             value={nanobotSettings.model || ''}
             onChange={(event) => onNanobotSettingChange?.('model', event.target.value)}
             fullWidth
           />
           <TextField
-            label="API Base"
+            label={t('onboarding.backend.apiBase')}
             value={nanobotSettings.apiBase || ''}
             onChange={(event) => onNanobotSettingChange?.('apiBase', event.target.value)}
-            placeholder="可选"
+            placeholder={t('onboarding.optional')}
             fullWidth
           />
           <TextField
-            label="API Key"
+            label={t('onboarding.backend.apiKey')}
             value={nanobotSettings.apiKey || ''}
             onChange={(event) => onNanobotSettingChange?.('apiKey', event.target.value)}
             type="password"
@@ -1137,7 +1171,7 @@ export default function FirstRunOnboardingDialog({
       return (
         <Stack spacing={1.5}>
           <Alert severity="info">
-            当前已选择 OpenClaw，可直接进入下一步。
+            {t('onboarding.backend.openclawReady')}
           </Alert>
         </Stack>
       );
@@ -1149,22 +1183,22 @@ export default function FirstRunOnboardingDialog({
       <Stack spacing={1.5}>
         <TextField
           select
-          label="启用 Nanobot"
+          label={t('app.nanobotEnabled')}
           value={nanobotSettings.enabled ? 'enabled' : 'disabled'}
           onChange={(event) => onNanobotSettingChange?.('enabled', event.target.value === 'enabled')}
           fullWidth
         >
-          <MenuItem value="enabled">启用</MenuItem>
-          <MenuItem value="disabled">禁用</MenuItem>
+          <MenuItem value="enabled">{t('common.enabled')}</MenuItem>
+          <MenuItem value="disabled">{t('common.disabled')}</MenuItem>
         </TextField>
 
         <Alert severity={nanobotRuntimeStatus.installed ? 'success' : 'warning'}>
-          {nanobotRuntimeStatus.installed ? 'Nanobot 运行时已就绪。' : 'Nanobot 运行时尚未安装，连接测试可能失败。'}
+          {nanobotRuntimeStatus.installed ? t('onboarding.backend.nanobotReady') : t('onboarding.backend.nanobotNotReady')}
         </Alert>
 
         <Stack direction="row" spacing={1}>
           <Button variant="contained" disabled={testDisabled} onClick={() => onTestChatBackendSettings?.()}>
-            {settingsTesting ? '测试中...' : '测试后端连接'}
+            {settingsTesting ? t('app.testingConnection') : t('app.connectionTest')}
           </Button>
         </Stack>
       </Stack>
@@ -1175,7 +1209,7 @@ export default function FirstRunOnboardingDialog({
     return (
       <Stack spacing={1.5}>
         <Typography variant="body2" color="text.secondary">
-          第一步先配置推理后端。你可以随时跳过，稍后在设置里继续。
+          {t('onboarding.backend.description')}
         </Typography>
 
         {backendSubStep === 0 && renderBackendSourceSubStep()}
@@ -1185,28 +1219,46 @@ export default function FirstRunOnboardingDialog({
     );
   };
 
+  const renderLanguageStep = () => (
+    <Stack spacing={1.5}>
+      <Typography variant="body2" color="text.secondary">
+        {t('onboarding.language.description')}
+      </Typography>
+      <TextField
+        select
+        label={t('language.label')}
+        value={language}
+        onChange={(event) => setLanguage(event.target.value)}
+        fullWidth
+      >
+        <MenuItem value={LANGUAGE_ZH_CN}>{t('language.zh')}</MenuItem>
+        <MenuItem value={LANGUAGE_EN_US}>{t('language.en')}</MenuItem>
+      </TextField>
+    </Stack>
+  );
+
   const renderAsrStep = () => {
     return (
       <Stack spacing={1.5}>
         <Typography variant="body2" color="text.secondary">
-          选择 ASR 来源。云端可配置 DashScope，本地可直接下载模型并测试延迟。
+          {t('onboarding.asr.description')}
         </Typography>
 
         <TextField
           select
-          label="ASR 来源"
+          label={t('onboarding.asr.source')}
           value={asrSource === 'skip' ? 'cloud' : asrSource}
           onChange={(event) => setAsrSource(event.target.value)}
           fullWidth
         >
-          <MenuItem value="cloud">云端（DashScope）</MenuItem>
-          <MenuItem value="local">本地模型</MenuItem>
+          <MenuItem value="cloud">{t('onboarding.source.cloudDashscope')}</MenuItem>
+          <MenuItem value="local">{t('onboarding.source.local')}</MenuItem>
         </TextField>
 
         {asrSource === 'cloud' && (
           <Stack spacing={1}>
             <TextField
-              label="DashScope API Key"
+              label={t('onboarding.dashscope.apiKey')}
               value={dashscopeSettings.apiKey}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, apiKey: event.target.value }))}
               type="password"
@@ -1214,26 +1266,26 @@ export default function FirstRunOnboardingDialog({
               fullWidth
             />
             <TextField
-              label="DashScope Base URL"
+              label={t('onboarding.dashscope.baseUrl')}
               value={dashscopeSettings.baseUrl}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, baseUrl: event.target.value }))}
               placeholder="wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
               fullWidth
             />
             <TextField
-              label="Workspace（可选）"
+              label={t('onboarding.dashscope.workspaceOptional')}
               value={dashscopeSettings.workspace}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, workspace: event.target.value }))}
               fullWidth
             />
             <TextField
-              label="ASR Model"
+              label={t('onboarding.asr.model')}
               value={dashscopeSettings.asrModel}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, asrModel: event.target.value }))}
               fullWidth
             />
             <TextField
-              label="ASR Language"
+              label={t('onboarding.asr.language')}
               value={dashscopeSettings.asrLanguage}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, asrLanguage: event.target.value }))}
               fullWidth
@@ -1245,7 +1297,7 @@ export default function FirstRunOnboardingDialog({
               }}
               disabled={voiceSaving}
             >
-              应用 ASR 云端配置
+              {t('onboarding.asr.applyCloud')}
             </Button>
           </Stack>
         )}
@@ -1254,7 +1306,7 @@ export default function FirstRunOnboardingDialog({
           <Stack spacing={1}>
             <TextField
               select
-              label="ASR 本地模型"
+              label={t('onboarding.asr.localModel')}
               value={selectedAsrCatalogId}
               onChange={(event) => setSelectedAsrCatalogId(event.target.value)}
               fullWidth
@@ -1265,7 +1317,7 @@ export default function FirstRunOnboardingDialog({
             </TextField>
 
             <Alert severity={installedAsrBundle ? 'success' : 'warning'}>
-              {installedAsrBundle ? '当前模型已下载。' : '当前模型未下载。'}
+              {installedAsrBundle ? t('onboarding.model.installed') : t('onboarding.model.notInstalled')}
             </Alert>
 
             <Stack direction="row" spacing={1}>
@@ -1276,7 +1328,7 @@ export default function FirstRunOnboardingDialog({
                 }}
                 disabled={isInstallingAsr || !selectedAsrCatalogId}
               >
-                {isInstallingAsr ? '下载中...' : (installedAsrBundle ? '重新下载' : '下载模型')}
+                {isInstallingAsr ? t('onboarding.download.inProgress') : (installedAsrBundle ? t('onboarding.download.redownload') : t('onboarding.download.model'))}
               </Button>
               <Button
                 variant="outlined"
@@ -1285,11 +1337,11 @@ export default function FirstRunOnboardingDialog({
                 }}
                 disabled={!installedAsrBundle || voiceSaving}
               >
-                设为当前 ASR
+                {t('onboarding.asr.setCurrent')}
               </Button>
             </Stack>
             {shouldShowAsrDownloadCard && renderInlineDownloadCard({
-              title: 'ASR 模型下载与安装',
+              title: t('onboarding.asr.downloadCardTitle'),
               task: asrDownloadTask,
               detailsOpen: asrDownloadDetailsOpen,
               onToggleDetails: () => setAsrDownloadDetailsOpen((current) => !current),
@@ -1298,13 +1350,13 @@ export default function FirstRunOnboardingDialog({
         )}
 
         <TextField
-          label="ASR 测试提示词"
+          label={t('onboarding.asr.prompt')}
           value={asrPrompt}
           onChange={(event) => setAsrPrompt(event.target.value)}
           fullWidth
         />
-        {asrTesting && !!getAsrTestProgressMessage(asrTestPhase) && (
-          <Alert severity="info">{getAsrTestProgressMessage(asrTestPhase)}</Alert>
+        {asrTesting && !!getAsrTestProgressMessage(t, asrTestPhase) && (
+          <Alert severity="info">{getAsrTestProgressMessage(t, asrTestPhase)}</Alert>
         )}
         <Button
           variant="outlined"
@@ -1313,12 +1365,15 @@ export default function FirstRunOnboardingDialog({
           }}
           disabled={asrTesting || ttsTesting || voiceLoading}
         >
-          {getAsrTestStatusText(asrTesting ? asrTestPhase : 'idle')}
+          {getAsrTestStatusText(t, asrTesting ? asrTestPhase : 'idle')}
         </Button>
 
         {!!asrResult && (
           <Alert severity="success">
-            {`ASR 耗时 ${formatMs(asrResult.latencyMs)}；识别结果：${asrResult.text || '（空）'}`}
+            {t('onboarding.asr.test.result', {
+              latency: formatMs(asrResult.latencyMs),
+              text: asrResult.text || t('voice.empty'),
+            })}
           </Alert>
         )}
       </Stack>
@@ -1329,26 +1384,26 @@ export default function FirstRunOnboardingDialog({
     return (
       <Stack spacing={1.5}>
         <Typography variant="body2" color="text.secondary">
-          选择 TTS 来源。云端可配置 DashScope；Edge TTS 属于云端语音，但无需单独配置 Key；本地模型可下载后直接测试首包和总延迟。
+          {t('onboarding.tts.description')}
         </Typography>
 
         <TextField
           select
-          label="TTS 来源"
+          label={t('onboarding.tts.source')}
           value={ttsSource}
           onChange={(event) => setTtsSource(event.target.value)}
           fullWidth
         >
-          <MenuItem value="skip">稍后配置（Skip）</MenuItem>
-          <MenuItem value="cloud">云端（DashScope）</MenuItem>
-          <MenuItem value="cloud-no-key">云端（无需配置 Key）</MenuItem>
-          <MenuItem value="local">本地模型</MenuItem>
+          <MenuItem value="skip">{t('onboarding.source.skipLater')}</MenuItem>
+          <MenuItem value="cloud">{t('onboarding.source.cloudDashscope')}</MenuItem>
+          <MenuItem value="cloud-no-key">{t('onboarding.source.cloudNoKey')}</MenuItem>
+          <MenuItem value="local">{t('onboarding.source.local')}</MenuItem>
         </TextField>
 
         {ttsSource === 'cloud' && (
           <Stack spacing={1}>
             <TextField
-              label="DashScope API Key"
+              label={t('onboarding.dashscope.apiKey')}
               value={dashscopeSettings.apiKey}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, apiKey: event.target.value }))}
               type="password"
@@ -1356,39 +1411,39 @@ export default function FirstRunOnboardingDialog({
               fullWidth
             />
             <TextField
-              label="DashScope Base URL"
+              label={t('onboarding.dashscope.baseUrl')}
               value={dashscopeSettings.baseUrl}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, baseUrl: event.target.value }))}
               placeholder="wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
               fullWidth
             />
             <TextField
-              label="Workspace（可选）"
+              label={t('onboarding.dashscope.workspaceOptional')}
               value={dashscopeSettings.workspace}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, workspace: event.target.value }))}
               fullWidth
             />
             <TextField
-              label="TTS Model"
+              label={t('onboarding.tts.model')}
               value={dashscopeSettings.ttsModel}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, ttsModel: event.target.value }))}
               fullWidth
             />
             <TextField
-              label="TTS Voice"
+              label={t('onboarding.tts.voice')}
               value={dashscopeSettings.ttsVoice}
               onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, ttsVoice: event.target.value }))}
               fullWidth
             />
             <Stack direction="row" spacing={1}>
               <TextField
-                label="TTS Language"
+                label={t('onboarding.tts.language')}
                 value={dashscopeSettings.ttsLanguage}
                 onChange={(event) => setDashscopeSettings((prev) => ({ ...prev, ttsLanguage: event.target.value }))}
                 fullWidth
               />
               <TextField
-                label="Sample Rate"
+                label={t('onboarding.tts.sampleRate')}
                 type="number"
                 value={dashscopeSettings.ttsSampleRate}
                 onChange={(event) => {
@@ -1401,7 +1456,7 @@ export default function FirstRunOnboardingDialog({
                 fullWidth
               />
               <TextField
-                label="Speech Rate"
+                label={t('onboarding.tts.speechRate')}
                 type="number"
                 value={dashscopeSettings.ttsSpeechRate}
                 onChange={(event) => {
@@ -1421,7 +1476,7 @@ export default function FirstRunOnboardingDialog({
               }}
               disabled={voiceSaving}
             >
-              应用 TTS 云端配置
+              {t('onboarding.tts.applyCloud')}
             </Button>
           </Stack>
         )}
@@ -1430,7 +1485,7 @@ export default function FirstRunOnboardingDialog({
           <Stack spacing={1}>
             <TextField
               select
-              label="云端 TTS（无需配置 Key）"
+              label={t('onboarding.tts.cloudNoKey')}
               value={selectedTtsCatalogId}
               onChange={(event) => setSelectedTtsCatalogId(event.target.value)}
               fullWidth
@@ -1441,7 +1496,7 @@ export default function FirstRunOnboardingDialog({
             </TextField>
 
             <Alert severity={installedTtsBundle ? 'success' : 'warning'}>
-              {installedTtsBundle ? '当前云端 TTS 运行时已准备完成。' : '当前云端 TTS 运行时尚未准备。'}
+              {installedTtsBundle ? t('onboarding.tts.cloudNoKeyReady') : t('onboarding.tts.cloudNoKeyNotReady')}
             </Alert>
 
             <Stack direction="row" spacing={1}>
@@ -1452,7 +1507,7 @@ export default function FirstRunOnboardingDialog({
                 }}
                 disabled={isInstallingTts || !selectedTtsCatalogId}
               >
-                {isInstallingTts ? '准备中...' : (installedTtsBundle ? '重新准备运行时' : '准备运行时')}
+                {isInstallingTts ? t('onboarding.download.preparingRuntime') : (installedTtsBundle ? t('onboarding.download.reprepareRuntime') : t('onboarding.download.prepareRuntime'))}
               </Button>
               <Button
                 variant="outlined"
@@ -1461,11 +1516,11 @@ export default function FirstRunOnboardingDialog({
                 }}
                 disabled={!installedTtsBundle || voiceSaving}
               >
-                设为当前 TTS
+                {t('onboarding.tts.setCurrent')}
               </Button>
             </Stack>
             {shouldShowTtsDownloadCard && renderInlineDownloadCard({
-              title: 'TTS 下载与安装',
+              title: t('onboarding.tts.downloadCardTitle'),
               task: ttsDownloadTask,
               detailsOpen: ttsDownloadDetailsOpen,
               onToggleDetails: () => setTtsDownloadDetailsOpen((current) => !current),
@@ -1477,7 +1532,7 @@ export default function FirstRunOnboardingDialog({
           <Stack spacing={1}>
             <TextField
               select
-              label="TTS 本地模型"
+              label={t('onboarding.tts.localModel')}
               value={selectedTtsCatalogId}
               onChange={(event) => setSelectedTtsCatalogId(event.target.value)}
               fullWidth
@@ -1488,7 +1543,7 @@ export default function FirstRunOnboardingDialog({
             </TextField>
 
             <Alert severity={installedTtsBundle ? 'success' : 'warning'}>
-              {installedTtsBundle ? '当前模型已下载。' : '当前模型未下载。'}
+              {installedTtsBundle ? t('onboarding.model.installed') : t('onboarding.model.notInstalled')}
             </Alert>
 
             <Stack direction="row" spacing={1}>
@@ -1499,7 +1554,7 @@ export default function FirstRunOnboardingDialog({
                 }}
                 disabled={isInstallingTts || !selectedTtsCatalogId}
               >
-                {isInstallingTts ? '下载中...' : (installedTtsBundle ? '重新下载' : '下载模型')}
+                {isInstallingTts ? t('onboarding.download.inProgress') : (installedTtsBundle ? t('onboarding.download.redownload') : t('onboarding.download.model'))}
               </Button>
               <Button
                 variant="outlined"
@@ -1508,11 +1563,11 @@ export default function FirstRunOnboardingDialog({
                 }}
                 disabled={!installedTtsBundle || voiceSaving}
               >
-                设为当前 TTS
+                {t('onboarding.tts.setCurrent')}
               </Button>
             </Stack>
             {shouldShowTtsDownloadCard && renderInlineDownloadCard({
-              title: 'TTS 下载与安装',
+              title: t('onboarding.tts.downloadCardTitle'),
               task: ttsDownloadTask,
               detailsOpen: ttsDownloadDetailsOpen,
               onToggleDetails: () => setTtsDownloadDetailsOpen((current) => !current),
@@ -1521,7 +1576,7 @@ export default function FirstRunOnboardingDialog({
         )}
 
         <TextField
-          label="TTS 测试文本"
+          label={t('onboarding.tts.testText')}
           value={ttsText}
           onChange={(event) => setTtsText(event.target.value)}
           multiline
@@ -1535,12 +1590,16 @@ export default function FirstRunOnboardingDialog({
           }}
           disabled={asrTesting || ttsTesting || voiceLoading}
         >
-          {ttsTesting ? 'TTS 测试中...' : 'TTS 延迟测试'}
+          {ttsTesting ? t('onboarding.tts.test.running') : t('onboarding.tts.test.action')}
         </Button>
 
         {!!ttsResult && (
           <Alert severity="success">
-            {`TTS 首包 ${formatMs(ttsResult.firstChunkLatencyMs)}；总耗时 ${formatMs(ttsResult.latencyMs)}；分片 ${ttsResult.chunkCount || 0}`}
+            {t('onboarding.tts.test.result', {
+              firstChunk: formatMs(ttsResult.firstChunkLatencyMs),
+              latency: formatMs(ttsResult.latencyMs),
+              chunkCount: ttsResult.chunkCount || 0,
+            })}
           </Alert>
         )}
       </Stack>
@@ -1551,37 +1610,35 @@ export default function FirstRunOnboardingDialog({
     return null;
   }
 
-  const skipButtonText = activeStep === 0 && nanobotRuntimeDownloading
-    ? '跳过且后台下载'
-    : 'Skip this step';
-  const backDisabled = (activeStep === 0 && backendSubStep === 0) || isBusy;
+  const backDisabled = activeStep === 0 || isBusy;
 
   return (
     <Dialog open={open} fullWidth maxWidth="sm" disableEscapeKeyDown>
-      <DialogTitle>首次使用引导</DialogTitle>
+      <DialogTitle>{t('onboarding.title')}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 0.5 }}>
           <Box>
             <Typography variant="body2" color="text.secondary">
-              每一步都可跳过；之后可在设置中继续完成配置。
+              {t('onboarding.subtitle')}
             </Typography>
           </Box>
 
           <Stepper activeStep={activeStep} alternativeLabel>
-            {STEP_LABELS.map((label) => (
+            {stepLabels.map((label) => (
               <Step key={label}>
                 <StepLabel>{label}</StepLabel>
               </Step>
             ))}
           </Stepper>
 
-          {activeStep === 0 && renderBackendStep()}
-          {activeStep === 1 && renderAsrStep()}
-          {activeStep === 2 && renderTtsStep()}
+          {activeStep === 0 && renderLanguageStep()}
+          {activeStep === 1 && renderBackendStep()}
+          {activeStep === 2 && renderAsrStep()}
+          {activeStep === 3 && renderTtsStep()}
 
           {(voiceLoading || voiceSaving) && (
             <Typography variant="caption" color="text.secondary">
-              正在同步语音配置...
+              {t('onboarding.voice.syncing')}
             </Typography>
           )}
 
@@ -1593,11 +1650,11 @@ export default function FirstRunOnboardingDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={() => { void handleSkipStep(); }} disabled={isBusy}>
-          {skipButtonText}
+          {t('common.skip')}
         </Button>
-        <Button onClick={handleBack} disabled={backDisabled}>上一步</Button>
+        <Button onClick={handleBack} disabled={backDisabled}>{t('common.back')}</Button>
         <Button onClick={handleNext} variant="contained" disabled={isBusy}>
-          {activeStep >= STEP_LABELS.length - 1 ? '完成引导' : '下一步'}
+          {activeStep >= TOTAL_STEPS - 1 ? t('onboarding.finish') : t('common.next')}
         </Button>
       </DialogActions>
     </Dialog>
