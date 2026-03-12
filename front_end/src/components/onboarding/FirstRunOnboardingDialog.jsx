@@ -283,7 +283,9 @@ function shouldAutoExpandDownloadDetails(task = {}, nowMs = Date.now()) {
     return false;
   }
 
-  return nowMs - phaseStartedAtMs >= AUTO_EXPAND_DETAILS_DELAY_MS;
+  const taskUpdatedAtMs = Number.isFinite(task?.updatedAt) ? task.updatedAt : 0;
+  const effectiveNowMs = Math.max(nowMs, taskUpdatedAtMs);
+  return effectiveNowMs - phaseStartedAtMs >= AUTO_EXPAND_DETAILS_DELAY_MS;
 }
 
 function findVoiceDownloadTaskByCapability({
@@ -459,9 +461,6 @@ export default function FirstRunOnboardingDialog({
   const ttsDownloadPhase = typeof ttsDownloadTask?.phase === 'string' ? ttsDownloadTask.phase : 'idle';
   const asrDownloadRunning = isInstallingAsr || isDownloadRunningPhase(asrDownloadPhase);
   const ttsDownloadRunning = isInstallingTts || isDownloadRunningPhase(ttsDownloadPhase);
-  const hasRunningInlineDownload = nanobotRuntimeDownloading
-    || asrDownloadRunning
-    || ttsDownloadRunning;
   const [downloadNowMs, setDownloadNowMs] = useState(() => Date.now());
   const shouldShowAsrDownloadCard = asrSource === 'local'
     && (asrDownloadRunning
@@ -478,9 +477,12 @@ export default function FirstRunOnboardingDialog({
       || nanobotDownloadPhase === 'completed'
       || nanobotDownloadPhase === 'failed'
       || (Array.isArray(nanobotRuntimeDownloadTask?.logs) && nanobotRuntimeDownloadTask.logs.length > 0));
+  const hasVisibleInlineDownloadCard = shouldShowNanobotDownloadCard
+    || shouldShowAsrDownloadCard
+    || shouldShowTtsDownloadCard;
 
   useEffect(() => {
-    if (!open || !hasRunningInlineDownload) {
+    if (!open || !hasVisibleInlineDownloadCard) {
       return undefined;
     }
 
@@ -491,7 +493,7 @@ export default function FirstRunOnboardingDialog({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [hasRunningInlineDownload, open]);
+  }, [hasVisibleInlineDownloadCard, open]);
 
   const shouldAutoExpandBackendDetails = shouldAutoExpandDownloadDetails(
     nanobotRuntimeDownloadTask,

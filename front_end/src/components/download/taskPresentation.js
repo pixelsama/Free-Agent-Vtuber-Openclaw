@@ -66,7 +66,10 @@ export function resolveTaskStatusText(task = {}, t) {
 }
 
 export function resolveTaskStatsText(task = {}, t) {
-  const nowMs = Number.isFinite(task?.nowMs) ? task.nowMs : Date.now();
+  const requestedNowMs = Number.isFinite(task?.nowMs) ? task.nowMs : Date.now();
+  const updatedAtMs = Number.isFinite(task?.updatedAt) ? task.updatedAt : 0;
+  // Prefer the freshest known timestamp from task updates to avoid stale elapsed displays.
+  const nowMs = Math.max(requestedNowMs, updatedAtMs);
   const phase = task?.phase || 'idle';
   if (phase === 'completed') {
     return t('download.completedStats');

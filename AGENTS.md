@@ -167,6 +167,9 @@
   - `Nanobot`: verify stages like Python runtime download/extract/install and final completion text.
   - `ASR/TTS`: verify Python env setup stages (`创建 env`, `安装依赖 n/5`), then model bytes/speed/ETA.
   - Confirm final state switches to installed and button text changes (`下载模型` -> `重新下载`).
+  - For ASR/TTS automation completion checks, do not rely on generic `任务完成` text alone:
+    - ASR completion should include model-installed UI text (`当前模型已下载` or `ASR 本地模型下载完成`) and `重新下载` visibility.
+    - TTS completion should include model-installed UI text (`当前模型已下载` or `TTS 本地模型下载完成`) and `重新下载` visibility.
 - Severity rule during run:
   - If a blocking failure appears (`无法下载`, persistent failed phase, unrecoverable navigation dead-end), stop further steps immediately.
   - Output root-cause analysis + concrete patch plan instead of continuing the remaining download flow.
@@ -174,6 +177,9 @@
   - Save automation logs/report under `/tmp/openclaw-gui-test/`, e.g.:
     - `cdp_full_flow.log`
     - `full-flow-report.json`
+  - Optional strict completion checker:
+    - `node docs/scripts/cdp_wait_model_download_done.js --kind asr --port 9222`
+    - `node docs/scripts/cdp_wait_model_download_done.js --kind tts --port 9222`
   - Report should include:
     - exact step where issue occurred,
     - visible UI text at that moment,

@@ -53,5 +53,18 @@ describe('resolveTaskStatsText', () => {
     expect(text).toContain('512 B/s');
     expect(text).toContain('预计剩余');
   });
-});
 
+  it('uses task updatedAt when provided nowMs is stale', () => {
+    const t = createTranslator();
+    const text = resolveTaskStatsText(
+      {
+        phase: 'running',
+        startedAtMs: 1000,
+        nowMs: 12000,
+        updatedAt: 26000,
+      },
+      t,
+    );
+    expect(text).toBe('已运行 25s');
+  });
+});
