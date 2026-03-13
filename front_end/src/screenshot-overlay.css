@@ -61,7 +61,7 @@ body,
 .screenshot-overlay-hint {
   position: absolute;
   left: 50%;
-  bottom: 24px;
+  bottom: 78px;
   transform: translateX(-50%);
   display: flex;
   gap: 16px;
@@ -73,6 +73,42 @@ body,
   font-size: 13px;
   backdrop-filter: blur(10px);
   pointer-events: none;
+}
+
+.screenshot-overlay-actions {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+}
+
+.screenshot-overlay-button {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.screenshot-overlay-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.screenshot-overlay-button-secondary {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(10, 17, 27, 0.86);
+  color: rgba(242, 247, 255, 0.96);
+}
+
+.screenshot-overlay-button-primary {
+  border-color: rgba(85, 169, 255, 0.88);
+  background: rgba(44, 132, 225, 0.95);
+  color: #fff;
 }
 
 .screenshot-overlay-error {

@@ -73,10 +73,10 @@ class ChatBackendManager {
     });
   }
 
-  async testConnection({ backend, settings }) {
+  async testConnection({ backend, settings, signal }) {
     const adapter = this.getBackend(backend);
     adapter.validateSettings(settings);
-    return adapter.testConnection({ settings });
+    return adapter.testConnection({ settings, signal });
   }
 
   mapError(error, { backend } = {}) {

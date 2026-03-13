@@ -21,8 +21,11 @@ class OpenClawBackendAdapter extends ChatBackendAdapter {
     this.client = client;
   }
 
-  async testConnection({ settings }) {
-    return this.client.testOpenClawConnection({ settings: resolveOpenClawSettings(settings) });
+  async testConnection({ settings, signal }) {
+    return this.client.testOpenClawConnection({
+      settings: resolveOpenClawSettings(settings),
+      signal,
+    });
   }
 
   async startStream({ settings, sessionId, content, options = {}, signal, onEvent }) {

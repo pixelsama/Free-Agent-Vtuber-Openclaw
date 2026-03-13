@@ -98,6 +98,12 @@ function ScreenshotOverlayApp() {
   }, [isSubmitting, normalizedSelection]);
 
   useEffect(() => {
+    if (typeof window.focus === 'function') {
+      window.focus();
+    }
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -138,6 +144,9 @@ function ScreenshotOverlayApp() {
 
     const onPointerUp = () => {
       setIsDragging(false);
+      if (typeof window.focus === 'function') {
+        window.focus();
+      }
     };
 
     window.addEventListener('pointermove', onPointerMove);
@@ -162,6 +171,10 @@ function ScreenshotOverlayApp() {
 
   const handlePointerDown = useCallback((event) => {
     if (event.button !== 0 || isSubmitting) {
+      return;
+    }
+
+    if (event.target?.closest?.('.screenshot-overlay-actions')) {
       return;
     }
 
@@ -214,6 +227,28 @@ function ScreenshotOverlayApp() {
         <span>拖拽选择区域</span>
         <span>Enter 确认</span>
         <span>Esc 取消</span>
+      </div>
+      <div className="screenshot-overlay-actions">
+        <button
+          type="button"
+          className="screenshot-overlay-button screenshot-overlay-button-secondary"
+          disabled={isSubmitting}
+          onClick={() => {
+            void cancelSelection();
+          }}
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          className="screenshot-overlay-button screenshot-overlay-button-primary"
+          disabled={!normalizedSelection || isSubmitting}
+          onClick={() => {
+            void confirmSelection();
+          }}
+        >
+          确认选区
+        </button>
       </div>
       {error && <div className="screenshot-overlay-error">{error}</div>}
     </div>

@@ -147,6 +147,14 @@ export default function ConfigDrawer({
   const nanobotApiKeyValue = nanobotApiKeySaved ? MASKED_SECRET_VALUE : (nanobotSettings.apiKey || '');
   const customNanobotSkills = Array.isArray(nanobotSkills?.customSkills) ? nanobotSkills.customSkills : [];
   const builtinNanobotSkills = Array.isArray(nanobotSkills?.builtinSkills) ? nanobotSkills.builtinSkills : [];
+  const normalizedSettingsFeedback = typeof settingsFeedback === 'string' ? settingsFeedback.toLowerCase() : '';
+  const normalizedSettingsError = typeof settingsError === 'string' ? settingsError.toLowerCase() : '';
+  const showSkillsFeedback =
+    Boolean(settingsFeedback)
+    && (settingsFeedback.includes('技能') || normalizedSettingsFeedback.includes('skill'));
+  const showSkillsError =
+    Boolean(settingsError)
+    && (settingsError.includes('技能') || normalizedSettingsError.includes('skill'));
   const testButtonDisabled = settingsSaving
     || settingsTesting
     || (selectedBackend === 'nanobot' && !nanobotSettings.enabled);
@@ -446,6 +454,8 @@ export default function ConfigDrawer({
                 {selectedBackend === 'nanobot' && (
                   <SectionAccordion title={t('app.nanobotSkillsTitle')}>
                     <Alert severity="info">{t('app.nanobotSkillsHelper')}</Alert>
+                    {showSkillsError && <Alert severity="error">{settingsError}</Alert>}
+                    {showSkillsFeedback && <Alert severity="success">{settingsFeedback}</Alert>}
                     <Stack direction="row" spacing={1}>
                       <Button
                         variant="outlined"

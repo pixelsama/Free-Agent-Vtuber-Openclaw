@@ -199,7 +199,7 @@ async function startOpenClawStream({ settings, sessionId, content, options = {},
   }
 }
 
-async function testOpenClawConnection({ settings }) {
+async function testOpenClawConnection({ settings, signal }) {
   const normalized = normalizeSettings(settings);
   const baseUrl = ensureSettingsReady(normalized);
   const targetUrl = `${baseUrl}/v1/chat/completions`;
@@ -221,6 +221,7 @@ async function testOpenClawConnection({ settings }) {
         messages: [{ role: 'user', content: 'ping' }],
         user: 'desktop-connection-test',
       }),
+      signal,
     });
   } catch (error) {
     throw toClientError(error);

@@ -143,12 +143,12 @@ class NanobotBackendAdapter extends ChatBackendAdapter {
     }
   }
 
-  async testConnection({ settings }) {
+  async testConnection({ settings, signal }) {
     const config = normalizeNanobotConfig(settings);
     this.debug('test-request', 'Testing Nanobot connection.', {
       config: redactNanobotConfig(config),
     });
-    return this.bridgeClient.testConnection({ config });
+    return this.bridgeClient.testConnection({ config, signal });
   }
 
   async startStream({ settings, sessionId, content, options = {}, signal, onEvent }) {

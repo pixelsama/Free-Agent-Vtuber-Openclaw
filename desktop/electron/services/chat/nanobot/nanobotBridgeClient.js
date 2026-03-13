@@ -116,6 +116,10 @@ function createNanobotBridgeClient({
   let processPromise = null;
   let stdoutBuffer = '';
   const bridgeDebugEnabled = isTruthyEnv(env?.NANOBOT_BRIDGE_DEBUG, false);
+  const testRequestTimeoutMs = Math.max(
+    5_000,
+    Number.parseInt(env?.NANOBOT_TEST_TIMEOUT_MS, 10) || 70_000,
+  );
   const pendingStreamRequests = new Map();
   const pendingTestRequests = new Map();
   const debug = (stage, message, details = undefined) => {
@@ -143,9 +147,28 @@ function createNanobotBridgeClient({
       if (pending.signal && pending.onAbort) {
         pending.signal.removeEventListener('abort', pending.onAbort);
       }
+      if (pending.timeoutId) {
+        clearTimeout(pending.timeoutId);
+      }
       pending.reject(error);
     }
     pendingTestRequests.clear();
+  };
+
+  const takePendingTestRequest = (requestId) => {
+    const pending = pendingTestRequests.get(requestId);
+    if (!pending) {
+      return null;
+    }
+
+    if (pending.signal && pending.onAbort) {
+      pending.signal.removeEventListener('abort', pending.onAbort);
+    }
+    if (pending.timeoutId) {
+      clearTimeout(pending.timeoutId);
+    }
+    pendingTestRequests.delete(requestId);
+    return pending;
   };
 
   const handleJsonLine = (line) => {
@@ -220,15 +243,10 @@ function createNanobotBridgeClient({
         latencyMs: Number.isFinite(message.latencyMs) ? Math.floor(message.latencyMs) : undefined,
         error: message.error || null,
       });
-      const pending = pendingTestRequests.get(requestId);
+      const pending = takePendingTestRequest(requestId);
       if (!pending) {
         return;
       }
-
-      if (pending.signal && pending.onAbort) {
-        pending.signal.removeEventListener('abort', pending.onAbort);
-      }
-      pendingTestRequests.delete(requestId);
 
       if (message.ok) {
         pending.resolve({
@@ -548,11 +566,10 @@ function createNanobotBridgeClient({
         } catch {
           // noop
         }
-        if (signal) {
-          signal.removeEventListener('abort', onAbort);
+        const pending = takePendingTestRequest(requestId);
+        if (pending) {
+          pending.reject(createAbortError());
         }
-        pendingTestRequests.delete(requestId);
-        reject(createAbortError());
       };
 
       if (signal?.aborted) {
@@ -564,11 +581,34 @@ function createNanobotBridgeClient({
         signal.addEventListener('abort', onAbort, { once: true });
       }
 
+      const timeoutId = setTimeout(() => {
+        debug('bridge-test-timeout', 'Nanobot test request timed out.', {
+          requestId,
+          timeoutMs: testRequestTimeoutMs,
+        });
+        try {
+          sendMessage({
+            type: 'abort',
+            requestId,
+          });
+        } catch {
+          // noop
+        }
+        const pending = takePendingTestRequest(requestId);
+        if (pending) {
+          pending.reject(createBridgeError(
+            'nanobot_test_timeout',
+            `Nanobot connection test timed out after ${testRequestTimeoutMs}ms.`,
+          ));
+        }
+      }, testRequestTimeoutMs);
+
       pendingTestRequests.set(requestId, {
         resolve,
         reject,
         signal,
         onAbort,
+        timeoutId,
       });
 
       try {
@@ -578,11 +618,12 @@ function createNanobotBridgeClient({
           config,
         });
       } catch (error) {
-        if (signal) {
-          signal.removeEventListener('abort', onAbort);
+        const pending = takePendingTestRequest(requestId);
+        if (pending) {
+          pending.reject(error);
+        } else {
+          reject(error);
         }
-        pendingTestRequests.delete(requestId);
-        reject(error);
       }
     });
   };

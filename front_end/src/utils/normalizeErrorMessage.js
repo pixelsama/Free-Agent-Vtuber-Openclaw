@@ -41,6 +41,9 @@ export function normalizeErrorMessage(error, t) {
   if (code === 'nanobot_unreachable') {
     return t('error.nanobotUnreachable');
   }
+  if (code === 'chat_backend_test_timeout' || code === 'nanobot_test_timeout') {
+    return t('error.chatBackendTestTimeout');
+  }
   if (code === 'nanobot_skills_invalid_archive') {
     return t('error.nanobotSkillsInvalidArchive');
   }

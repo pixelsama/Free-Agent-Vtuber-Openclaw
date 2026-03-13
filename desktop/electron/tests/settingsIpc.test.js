@@ -82,6 +82,34 @@ test('settings:test returns mapped error when backend test fails', async () => {
   assert.equal(result.error.code, 'openclaw_upstream_error');
 });
 
+test('settings:test returns timeout error when backend test hangs', async () => {
+  const ipcMain = createIpcMainMock();
+
+  const settingsStore = {
+    getPublic: () => ({ hasToken: true }),
+    merge: () => ({ chatBackend: 'nanobot' }),
+    save: async (payload) => payload,
+  };
+
+  const backendManager = {
+    resolveBackendName: () => 'nanobot',
+    testConnection: async () => new Promise(() => {}),
+    mapError: () => ({ code: 'nanobot_unreachable', message: 'unreachable' }),
+  };
+
+  registerSettingsIpc({
+    ipcMain,
+    settingsStore,
+    backendManager,
+  });
+
+  const result = await ipcMain.invoke('settings:test', {
+    timeoutMs: 20,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'chat_backend_test_timeout');
+});
+
 test('settings:nanobot:pick-workspace returns selected directory path', async () => {
   const ipcMain = createIpcMainMock();
 

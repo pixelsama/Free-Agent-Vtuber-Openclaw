@@ -1,6 +1,8 @@
 const path = require('node:path');
 const { BrowserWindow, desktopCapturer, screen } = require('electron');
 
+const CAPTURE_SELECTION_TIMEOUT_MS = 3 * 60 * 1000;
+
 function delay(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -94,6 +96,8 @@ class ScreenshotSelectionService {
     };
     this.activeSession = session;
 
+    let sessionTimeoutId = null;
+
     try {
       if (ownerState.wasVisible) {
         ownerWindow.hide();
@@ -108,6 +112,16 @@ class ScreenshotSelectionService {
       const resultPromise = new Promise((resolve) => {
         session.resolveResult = resolve;
       });
+      sessionTimeoutId = setTimeout(() => {
+        if (this.activeSession !== session) {
+          return;
+        }
+        void this.finishSession({
+          ok: false,
+          canceled: true,
+          reason: 'capture_selection_timeout',
+        });
+      }, CAPTURE_SELECTION_TIMEOUT_MS);
       try {
         session.overlayWindow = await this.createOverlayWindow(targetDisplay);
       } catch (error) {
@@ -128,6 +142,10 @@ class ScreenshotSelectionService {
         canceled: false,
         reason: error?.message || 'capture_not_supported',
       };
+    } finally {
+      if (sessionTimeoutId) {
+        clearTimeout(sessionTimeoutId);
+      }
     }
   }
 
@@ -186,9 +204,17 @@ class ScreenshotSelectionService {
 
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
     overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    overlayWindow.webContents.once('did-finish-load', () => {
+      if (overlayWindow.isDestroyed()) {
+        return;
+      }
+      overlayWindow.focus();
+      overlayWindow.webContents.focus();
+    });
     overlayWindow.once('ready-to-show', () => {
       overlayWindow.show();
       overlayWindow.focus();
+      overlayWindow.webContents.focus();
     });
 
     overlayWindow.on('closed', () => {

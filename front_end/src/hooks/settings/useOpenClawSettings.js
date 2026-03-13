@@ -40,6 +40,7 @@ const defaultNanobotSkillsState = {
   builtinSkills: [],
 };
 const SETTINGS_AUTOSAVE_DEBOUNCE_MS = 500;
+const CONNECTION_TEST_TIMEOUT_MS = 75_000;
 
 function normalizeSkillItem(item = {}) {
   const skillName = typeof item.skillName === 'string' ? item.skillName.trim() : '';
@@ -368,7 +369,25 @@ export function useChatBackendSettings({ t, normalizeError }) {
 
     try {
       const payload = buildChatBackendSettingsPayload(chatBackendSettings);
-      const result = await desktopBridge.settings.testConnection(payload);
+      let timeoutId = null;
+      const timeoutPromise = new Promise((resolve) => {
+        timeoutId = setTimeout(() => {
+          resolve({
+            ok: false,
+            error: {
+              code: 'chat_backend_test_timeout',
+              message: `连接测试超时（>${Math.floor(CONNECTION_TEST_TIMEOUT_MS / 1000)}s），请重试。`,
+            },
+          });
+        }, CONNECTION_TEST_TIMEOUT_MS);
+      });
+      const result = await Promise.race([
+        desktopBridge.settings.testConnection(payload),
+        timeoutPromise,
+      ]);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       if (!result?.ok) {
         setSettingsError(formatError(result?.error));
       } else {

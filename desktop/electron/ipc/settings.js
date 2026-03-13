@@ -1,6 +1,16 @@
 const { dialog } = require('electron');
 const { createChatBackendManager } = require('../services/chat/backendManager');
 
+const DEFAULT_CONNECTION_TEST_TIMEOUT_MS = 70_000;
+
+function normalizeTimeoutMs(value, fallback = DEFAULT_CONNECTION_TEST_TIMEOUT_MS) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(parsed, 5 * 60 * 1000);
+}
+
 function registerSettingsIpc({
   ipcMain,
   settingsStore,
@@ -16,6 +26,11 @@ function registerSettingsIpc({
 
   ipcMain.handle('settings:test', async (_event, overrideSettings = {}) => {
     let backend = 'openclaw';
+    const timeoutMs = normalizeTimeoutMs(overrideSettings?.timeoutMs);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
 
     try {
       const settings = settingsStore.merge(overrideSettings);
@@ -27,12 +42,24 @@ function registerSettingsIpc({
       return await backendManager.testConnection({
         backend,
         settings,
+        signal: controller.signal,
       });
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        return {
+          ok: false,
+          error: {
+            code: 'chat_backend_test_timeout',
+            message: `连接测试超时（>${Math.floor(timeoutMs / 1000)}s），请重试。`,
+          },
+        };
+      }
       return {
         ok: false,
         error: backendManager.mapError(error, { backend }),
       };
+    } finally {
+      clearTimeout(timeoutId);
     }
   });
 
