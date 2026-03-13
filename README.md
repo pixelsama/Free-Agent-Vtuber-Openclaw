@@ -1,60 +1,35 @@
-# Free-Agent-Vtuber OpenClaw Desktop（Electron）
+# OtakuClaw
 
-本仓库当前主目标是桌面端：
-- 前端：React 18 + Vite
-- 桌面壳：Electron
-- 本地适配层：Electron Main（Node）
-- 上游 AI：OpenClaw `/v1/chat/completions`
+<p align="center">
+  <img src="./Logo.jpg" alt="OtakuClaw Logo" width="180" />
+</p>
 
-当前默认链路为 Electron + OpenClaw，无 Python 后端服务依赖。
+OtakuClaw 是一个可直接安装使用的 macOS 桌面应用（Electron）。
 
-## 快速开始（桌面开发）
+## 下载
 
-1. 安装依赖
+- 最新版本（macOS）：  
+  https://github.com/pixelsama/OtakuClaw/releases/latest
 
-```bash
-pnpm install
-```
+## 当前版本状态
 
-2. 启动 Electron + 前端开发服务器
+- 已提供稳定可安装的 macOS App（DMG）。
+- 当前公开版本仅开放 `Nanobot` 后端。
+- `OpenClaw` 后端已在现版本中临时禁用，后续版本再重新开放。
 
-```bash
-pnpm run desktop:dev
-```
+## 主要能力
 
-3. 在应用内打开“设置”面板，填写：
-- `OpenClaw Base URL`
-- `OpenClaw Token`
-- `OpenClaw Agent ID`
+- 首次引导安装 Nanobot 运行时
+- 一键下载并启用本地 ASR / TTS 模型
+- 聊天、语音链路与截图提问能力
+- 配置持久化与系统密钥链存储（桌面端）
 
-4. 点击“连接测试”成功后即可发送文本消息。
+## 项目结构
 
-## 打包发布
-
-```bash
-pnpm run desktop:build
-```
-
-默认会先构建前端，再用 `electron-builder` 生成安装包（Win/macOS/Linux）。
-
-## 测试
-
-```bash
-pnpm run test:desktop
-pnpm run test:frontend
-```
-
-`desktop` 测试覆盖设置存储、IPC 流式映射与中断行为。
-
-## 目录说明
-
-- `desktop/electron/`：Electron 主进程、preload、IPC、OpenClaw 适配
+- `desktop/electron/`：主进程、IPC、运行时与模型管理
 - `front_end/`：React UI
-- `docs/`：设计与规划文档（历史文档已归档）
+- `docs/`：文档与设计记录
 
-## 关键特性
+## 许可证
 
-- Renderer 通过 IPC 请求流式聊天，不直接持有 OpenClaw token
-- 桌面端优先使用系统密钥链存储 OpenClaw token（`keytar`）
-- 主进程把 OpenClaw SSE 映射为 `text-delta / done / error`
-- 支持 `chat:stream:abort` 中断流式请求
+MIT（见 `LICENSE`）
