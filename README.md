@@ -32,4 +32,4 @@ OtakuClaw 是一个可直接安装使用的 macOS 桌面应用（Electron）。
 
 ## 许可证
 
-MIT（见 `LICENSE`）
+Creative Commons Attribution-NonCommercial 4.0 International（CC BY-NC 4.0，见 `LICENSE`）
