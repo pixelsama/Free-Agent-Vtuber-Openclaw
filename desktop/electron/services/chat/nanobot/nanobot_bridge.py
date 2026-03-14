@@ -7,6 +7,7 @@ Protocol: JSON Lines over stdin/stdout.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import json
 import os
@@ -30,6 +31,13 @@ AGENT_INSTANCE = None
 ACTIVE_TASKS: dict[str, asyncio.Task] = {}
 DESKTOP_PROMPT_PATCH_FLAG = "_openclaw_desktop_prompt_patched"
 DESKTOP_SKILLS_PATCH_FLAG = "_openclaw_desktop_skills_patched"
+LITELLM_OPENROUTER_PATCH_FLAG = "_openclaw_desktop_openrouter_native_model_patched"
+OPENROUTER_PROVIDER_NAME = "openrouter"
+OPENROUTER_MODEL_PREFIX = "openrouter/"
+OPENROUTER_NATIVE_MODEL_CONTEXT: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "openclaw_openrouter_native_model",
+    default=False,
+)
 
 DESKTOP_REALTIME_GUIDANCE = """## Desktop Realtime Conversation Guidance
 - You are speaking inside a realtime AI companion app.
@@ -51,6 +59,22 @@ def normalize_string(value: Any, fallback: str = "") -> str:
     return value.strip()
 
 
+def is_openrouter_native_model(model: Any) -> bool:
+    normalized = normalize_string(model).lower()
+    return normalized.startswith(OPENROUTER_MODEL_PREFIX)
+
+
+def normalize_openrouter_native_model(model: Any, fallback: str = "openrouter/auto") -> str:
+    candidate = normalize_string(model, fallback) or fallback
+    remainder = candidate
+    while remainder.lower().startswith(OPENROUTER_MODEL_PREFIX):
+        remainder = remainder[len(OPENROUTER_MODEL_PREFIX):]
+    remainder = remainder.lstrip("/")
+    if not remainder:
+        remainder = "auto"
+    return f"{OPENROUTER_MODEL_PREFIX}{remainder}"
+
+
 def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
     fallback_workspace = normalize_string(
         os.environ.get("NANOBOT_WORKSPACE"),
@@ -64,11 +88,17 @@ def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(temperature, (float, int)):
         temperature = 0.2
 
+    provider = normalize_string(config.get("provider"), "openrouter") or "openrouter"
+    model = normalize_string(config.get("model"), "anthropic/claude-opus-4-5") or "anthropic/claude-opus-4-5"
+    if provider == OPENROUTER_PROVIDER_NAME and is_openrouter_native_model(model):
+        # Legacy workaround value `openrouter/openrouter/*` is normalized to single prefix.
+        model = normalize_openrouter_native_model(model, model)
+
     return {
         "workspace": normalize_string(config.get("workspace"), fallback_workspace) or fallback_workspace,
         "allowHighRiskTools": bool(config.get("allowHighRiskTools")),
-        "provider": normalize_string(config.get("provider"), "openrouter") or "openrouter",
-        "model": normalize_string(config.get("model"), "anthropic/claude-opus-4-5") or "anthropic/claude-opus-4-5",
+        "provider": provider,
+        "model": model,
         "apiBase": normalize_string(config.get("apiBase"), ""),
         "apiKey": normalize_string(config.get("apiKey"), ""),
         "maxTokens": max_tokens,
@@ -207,6 +237,96 @@ def patch_skills_loader(modules: dict[str, Any]) -> None:
     setattr(skills_loader_cls, DESKTOP_SKILLS_PATCH_FLAG, True)
 
 
+def patch_litellm_openrouter_native_model(modules: dict[str, Any]) -> None:
+    lite_llm_provider_cls = modules.get("LiteLLMProvider")
+    if not lite_llm_provider_cls:
+        return
+
+    provider_module = sys.modules.get(lite_llm_provider_cls.__module__)
+    if provider_module is None:
+        return
+
+    if getattr(provider_module, LITELLM_OPENROUTER_PATCH_FLAG, False):
+        return
+
+    original_acompletion = getattr(provider_module, "acompletion", None)
+    if not callable(original_acompletion):
+        return
+
+    async def patched_acompletion(*args, **kwargs):
+        if OPENROUTER_NATIVE_MODEL_CONTEXT.get():
+            model_name = normalize_string(kwargs.get("model"))
+            if model_name.lower().startswith(OPENROUTER_MODEL_PREFIX):
+                mutable_kwargs = dict(kwargs)
+                mutable_kwargs.setdefault("custom_llm_provider", OPENROUTER_PROVIDER_NAME)
+                kwargs = mutable_kwargs
+        return await original_acompletion(*args, **kwargs)
+
+    provider_module.acompletion = patched_acompletion
+    setattr(provider_module, LITELLM_OPENROUTER_PATCH_FLAG, True)
+
+
+def patch_openrouter_provider_chat(provider: Any, *, use_native_openrouter_model: bool) -> None:
+    if not use_native_openrouter_model:
+        return
+    if getattr(provider, "_openclaw_openrouter_chat_patched", False):
+        return
+
+    original_chat = provider.chat
+
+    async def patched_chat(*args, **kwargs):
+        token = OPENROUTER_NATIVE_MODEL_CONTEXT.set(True)
+        try:
+            return await original_chat(*args, **kwargs)
+        finally:
+            OPENROUTER_NATIVE_MODEL_CONTEXT.reset(token)
+
+    provider.chat = patched_chat
+    setattr(provider, "_openclaw_openrouter_chat_patched", True)
+
+
+def build_model_trace(
+    raw_config: dict[str, Any] | None,
+    normalized_config: dict[str, Any],
+) -> dict[str, str]:
+    raw_config = raw_config or {}
+    configured_model = normalize_string(raw_config.get("model"), normalized_config.get("model"))
+    if not configured_model:
+        configured_model = normalized_config.get("model", "")
+    effective_model = normalize_string(normalized_config.get("model"), configured_model)
+    provider_name = normalize_string(normalized_config.get("provider"), "openrouter")
+    return {
+        "provider": provider_name,
+        "configuredModel": configured_model,
+        "effectiveModel": effective_model,
+    }
+
+
+def append_model_trace(payload: dict[str, Any], model_trace: dict[str, str] | None) -> dict[str, Any]:
+    if not model_trace:
+        return payload
+
+    provider_name = normalize_string(model_trace.get("provider"))
+    configured_model = normalize_string(model_trace.get("configuredModel"))
+    effective_model = normalize_string(model_trace.get("effectiveModel"))
+    if not configured_model and not effective_model:
+        return payload
+
+    model_hint = (
+        f"provider={provider_name or 'unknown'}, "
+        f"configured_model={configured_model or 'unknown'}, "
+        f"effective_model={effective_model or 'unknown'}"
+    )
+    message = normalize_string(payload.get("message"), "Nanobot model call failed.")
+    return {
+        **payload,
+        "message": f"{message} [{model_hint}]",
+        "provider": provider_name,
+        "configuredModel": configured_model,
+        "effectiveModel": effective_model,
+    }
+
+
 def create_provider(modules: dict[str, Any], config: dict[str, Any]):
     provider_name = config["provider"]
     model = config["model"]
@@ -230,13 +350,19 @@ def create_provider(modules: dict[str, Any], config: dict[str, Any]):
     if not spec.is_oauth and not api_key:
         raise BridgeError("nanobot_missing_config", "Nanobot API Key is required.")
 
+    patch_litellm_openrouter_native_model(modules)
     lite_llm_provider = modules["LiteLLMProvider"]
-    return lite_llm_provider(
+    provider = lite_llm_provider(
         api_key=api_key or None,
         api_base=api_base,
         default_model=model,
         provider_name=provider_name,
     )
+    use_native_openrouter_model = (
+        provider_name == OPENROUTER_PROVIDER_NAME and is_openrouter_native_model(model)
+    )
+    patch_openrouter_provider_chat(provider, use_native_openrouter_model=use_native_openrouter_model)
+    return provider
 
 
 def create_agent(config: dict[str, Any]):
@@ -312,7 +438,7 @@ def get_or_create_agent(config: dict[str, Any]):
     return AGENT_INSTANCE
 
 
-def map_exception(exc: Exception) -> dict[str, Any]:
+def map_exception(exc: Exception, model_trace: dict[str, str] | None = None) -> dict[str, Any]:
     if isinstance(exc, BridgeError):
         payload = {
             "code": exc.code,
@@ -320,12 +446,13 @@ def map_exception(exc: Exception) -> dict[str, Any]:
         }
         if exc.status is not None:
             payload["status"] = exc.status
-        return payload
+        return append_model_trace(payload, model_trace)
 
-    return {
+    payload = {
         "code": "nanobot_model_call_failed",
         "message": str(exc) or "Nanobot model call failed.",
     }
+    return append_model_trace(payload, model_trace)
 
 
 def first_progress_block(content: str) -> str:
@@ -350,11 +477,13 @@ async def handle_start(
     media_paths: list[str],
     config: dict[str, Any],
 ) -> None:
+    model_trace: dict[str, str] | None = None
     try:
         if not content:
             raise BridgeError("nanobot_missing_config", "Chat content is required.")
 
         normalized = normalize_config(config)
+        model_trace = build_model_trace(config, normalized)
         if not normalized["apiKey"]:
             raise BridgeError("nanobot_missing_config", "Nanobot API Key is required.")
 
@@ -461,7 +590,7 @@ async def handle_start(
                 "requestId": request_id,
                 "event": {
                     "type": "error",
-                    "payload": map_exception(exc),
+                    "payload": map_exception(exc, model_trace),
                 },
             }
         )
@@ -469,8 +598,10 @@ async def handle_start(
 
 async def handle_test(request_id: str, config: dict[str, Any]) -> None:
     started_at = time.perf_counter()
+    model_trace: dict[str, str] | None = None
     try:
         normalized = normalize_config(config)
+        model_trace = build_model_trace(config, normalized)
         if not normalized["apiKey"]:
             raise BridgeError("nanobot_missing_config", "Nanobot API Key is required.")
 
@@ -512,7 +643,7 @@ async def handle_test(request_id: str, config: dict[str, Any]) -> None:
                 "type": "test-result",
                 "requestId": request_id,
                 "ok": False,
-                "error": map_exception(exc),
+                "error": map_exception(exc, model_trace),
             }
         )
 

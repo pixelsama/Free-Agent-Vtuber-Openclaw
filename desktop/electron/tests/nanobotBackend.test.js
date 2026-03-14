@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   NanobotBackendAdapter,
+  resolveEffectiveModel,
   sanitizeNanobotDisplayText,
   sliceIncrementalNanobotText,
   shouldForwardNanobotProgress,
@@ -270,6 +271,25 @@ test('nanobot backend emits debug logs for request, sanitize and forward stages'
   assert.ok(debugLogs.some((entry) => entry.stage === 'event-forwarded'));
   const startRequest = debugLogs.find((entry) => entry.stage === 'start-request');
   assert.equal(startRequest?.details?.config?.apiKey, '[redacted]');
+  assert.equal(startRequest?.details?.modelTrace?.configuredModel, 'anthropic/claude-opus-4-5');
+  assert.equal(startRequest?.details?.modelTrace?.effectiveModel, 'anthropic/claude-opus-4-5');
+});
+
+test('resolveEffectiveModel normalizes openrouter native model with duplicate prefix', () => {
+  assert.equal(
+    resolveEffectiveModel({
+      provider: 'openrouter',
+      model: 'openrouter/openrouter/hunter-alpha',
+    }),
+    'openrouter/hunter-alpha',
+  );
+  assert.equal(
+    resolveEffectiveModel({
+      provider: 'openrouter',
+      model: 'qwen/qwen3.5-flash-02-23',
+    }),
+    'qwen/qwen3.5-flash-02-23',
+  );
 });
 
 test('nanobot backend forwards progress before final reply and avoids duplicate overlap', async () => {

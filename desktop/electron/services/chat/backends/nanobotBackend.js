@@ -10,6 +10,32 @@ function normalizeString(value, fallback = '') {
   return value.trim();
 }
 
+function isOpenRouterNativeModel(model) {
+  return normalizeString(model).toLowerCase().startsWith('openrouter/');
+}
+
+function normalizeOpenRouterNativeModel(model) {
+  const normalized = normalizeString(model);
+  if (!normalized) {
+    return normalized;
+  }
+  let remainder = normalized;
+  while (remainder.toLowerCase().startsWith('openrouter/')) {
+    remainder = remainder.slice('openrouter/'.length);
+  }
+  remainder = remainder.replace(/^\/+/, '');
+  return remainder ? `openrouter/${remainder}` : 'openrouter/auto';
+}
+
+function resolveEffectiveModel(config = {}) {
+  const provider = normalizeString(config.provider).toLowerCase();
+  const configuredModel = normalizeString(config.model);
+  if (provider === 'openrouter' && isOpenRouterNativeModel(configuredModel)) {
+    return normalizeOpenRouterNativeModel(configuredModel);
+  }
+  return configuredModel;
+}
+
 function normalizeNanobotConfig(settings = {}) {
   const source = settings && typeof settings.nanobot === 'object' ? settings.nanobot : {};
   const fallbackWorkspace = normalizeString(process.env.NANOBOT_WORKSPACE, path.resolve(process.cwd(), 'nanobot-workspace'));
@@ -145,14 +171,21 @@ class NanobotBackendAdapter extends ChatBackendAdapter {
 
   async testConnection({ settings, signal }) {
     const config = normalizeNanobotConfig(settings);
+    const effectiveModel = resolveEffectiveModel(config);
     this.debug('test-request', 'Testing Nanobot connection.', {
       config: redactNanobotConfig(config),
+      modelTrace: {
+        provider: config.provider,
+        configuredModel: config.model,
+        effectiveModel,
+      },
     });
     return this.bridgeClient.testConnection({ config, signal });
   }
 
   async startStream({ settings, sessionId, content, options = {}, signal, onEvent }) {
     const config = normalizeNanobotConfig(settings);
+    const effectiveModel = resolveEffectiveModel(config);
     const mediaPaths = [];
     const attachments = Array.isArray(options?.attachments) ? options.attachments : [];
     for (const attachment of attachments) {
@@ -176,6 +209,11 @@ class NanobotBackendAdapter extends ChatBackendAdapter {
       attachmentCount: attachments.length,
       mediaPaths,
       config: redactNanobotConfig(config),
+      modelTrace: {
+        provider: config.provider,
+        configuredModel: config.model,
+        effectiveModel,
+      },
     });
     return this.bridgeClient.start({
       sessionId,
@@ -291,6 +329,7 @@ class NanobotBackendAdapter extends ChatBackendAdapter {
 module.exports = {
   NanobotBackendAdapter,
   normalizeNanobotConfig,
+  resolveEffectiveModel,
   sanitizeNanobotDisplayText,
   sliceIncrementalNanobotText,
   shouldForwardNanobotProgress,
