@@ -10,6 +10,9 @@
 ## 目标
 
 - 将 `Provider` 改为下拉框，仅展示 Nanobot 支持的供应商。
+- 该下拉策略同时覆盖：
+  - 首次引导页（首次使用引导）
+  - 软件内配置面板（设置抽屉 / ConfigDrawer）
 - `API Key` 粘贴后立即显示密码掩码（黑点），避免“粘贴了但看起来没内容”的误判。
 
 ## 设计范围
@@ -23,6 +26,9 @@
 
 1. Provider 改为下拉框
    - 把当前 `TextField` 自由输入改为 `TextField select`。
+   - 实施位置必须包含：
+     - 引导页后端配置步骤
+     - 配置面板中的 Nanobot 后端配置区
    - 选项来源优先级：
      - 优先：由后端返回“当前 Nanobot Runtime 支持的 provider 列表”。
      - 兜底：内置白名单（至少包含当前默认值 `openrouter` 与 `custom`）。
