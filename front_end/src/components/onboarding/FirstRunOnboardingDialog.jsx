@@ -1205,39 +1205,6 @@ export default function FirstRunOnboardingDialog({
     }
   }, [applyTtsConfig, asrTesting, ttsTesting, ttsText, t]);
 
-  const handleSkipStep = useCallback(async () => {
-    setVoiceError('');
-    setVoiceFeedback('');
-
-    if (activeStep === 0) {
-      setActiveStep(1);
-      return;
-    }
-
-    if (activeStep === 1 && backendSubStep < BACKEND_SUB_STEP_COUNT - 1) {
-      setBackendSubStep((current) => Math.min(BACKEND_SUB_STEP_COUNT - 1, current + 1));
-      return;
-    }
-
-    if (activeStep === 2) {
-      setAsrSource('skip');
-      setAsrSubStep(0);
-    }
-    if (activeStep === 3) {
-      setTtsSource('skip');
-      setTtsSubStep(0);
-    }
-
-    if (activeStep >= TOTAL_STEPS - 1) {
-      await onFinish?.();
-      return;
-    }
-    if (activeStep === 1) {
-      setBackendSubStep(0);
-    }
-    setActiveStep((current) => Math.min(TOTAL_STEPS - 1, current + 1));
-  }, [activeStep, backendSubStep, onFinish]);
-
   const handleNext = useCallback(async () => {
     if (activeStep === 0) {
       setActiveStep(1);
@@ -2142,9 +2109,6 @@ export default function FirstRunOnboardingDialog({
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => { void handleSkipStep(); }} disabled={isBusy}>
-          {t('common.skip')}
-        </Button>
         <Button onClick={handleBack} disabled={backDisabled}>{t('common.back')}</Button>
         <Button onClick={handleNext} variant="contained" disabled={isBusy}>
           {nextButtonText}
