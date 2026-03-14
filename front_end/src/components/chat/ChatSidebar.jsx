@@ -273,7 +273,7 @@ export default function ChatSidebar({
                   className="chat-toolbar-btn"
                   aria-label={voiceEnabled ? t('composer.voiceDisableTitle') : t('composer.voiceEnableTitle')}
                 >
-                  {voiceEnabled ? <MicOffIcon fontSize="small" /> : <MicIcon fontSize="small" />}
+                  {voiceEnabled ? <MicIcon fontSize="small" /> : <MicOffIcon fontSize="small" />}
                 </IconButton>
               </span>
             </Tooltip>
