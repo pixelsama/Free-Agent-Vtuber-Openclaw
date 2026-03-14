@@ -341,7 +341,7 @@ export default function PetShell({
             aria-label={voiceEnabled ? t('composer.voiceDisableTitle') : t('composer.voiceEnableTitle')}
             disabled={voiceToggleDisabled}
           >
-            {voiceEnabled ? <MicOffIcon /> : <MicIcon />}
+            {voiceEnabled ? <MicIcon /> : <MicOffIcon />}
           </IconButton>
           {canCaptureScreen && (
             <IconButton
