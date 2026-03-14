@@ -2,6 +2,7 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
+  Alert,
   Box,
   Button,
   Card,
@@ -28,6 +29,8 @@ export default function BackgroundPanel({
   hasBackground,
   backgroundOpacity,
   cachedBackgrounds,
+  acceptedFileTypes = 'image/*',
+  backgroundUploadError = '',
   onUploadBackground,
   onUpdateBackgroundOpacity,
   onClearBackground,
@@ -56,14 +59,23 @@ export default function BackgroundPanel({
               <input
                 hidden
                 type="file"
-                accept="image/*"
-                onChange={(event) => onUploadBackground(event.target.files?.[0])}
+                accept={acceptedFileTypes}
+                onChange={(event) => {
+                  onUploadBackground(event.target.files?.[0]);
+                  event.target.value = '';
+                }}
               />
             </Button>
             <Button variant="outlined" color="error" disabled={!hasBackground} onClick={onClearBackground}>
               {t('background.clearCurrent')}
             </Button>
           </Stack>
+
+          {backgroundUploadError && (
+            <Alert severity="error" variant="outlined">
+              {backgroundUploadError}
+            </Alert>
+          )}
 
           <Box>
             <Typography variant="body2" sx={{ mb: 1 }}>

@@ -415,6 +415,8 @@ const MESSAGES = {
     'background.clearCache': '清空缓存',
     'background.apply': '应用',
     'background.delete': '删除',
+    'background.unsupportedFormat': '不支持该图片格式。请使用 PNG、JPG、JPEG 或 WEBP。',
+    'background.uploadFailed': '背景图片加载失败，请检查文件是否损坏或改用 PNG/JPG/JPEG/WEBP。',
 
     'live2d.loadingModel': '加载Live2D模型中...',
     'live2d.noModelSelected': '请先在控制面板导入并选择模型 ZIP',
@@ -846,6 +848,8 @@ const MESSAGES = {
     'background.clearCache': 'Clear Cache',
     'background.apply': 'Apply',
     'background.delete': 'Delete',
+    'background.unsupportedFormat': 'Unsupported image format. Please use PNG, JPG, JPEG, or WEBP.',
+    'background.uploadFailed': 'Failed to load background image. Check file integrity or use PNG/JPG/JPEG/WEBP.',
 
     'live2d.loadingModel': 'Loading Live2D model...',
     'live2d.noModelSelected': 'Import and select a model ZIP in the control panel first.',

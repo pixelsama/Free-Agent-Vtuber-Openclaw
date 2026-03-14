@@ -28,6 +28,9 @@ import './Live2DControls.css';
 
 // Temporary product decision: hide motion/expression controls from end users for now.
 const SHOW_ADVANCED_LIVE2D_CONTROLS = false;
+const SUPPORTED_BACKGROUND_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
+const SUPPORTED_BACKGROUND_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp']);
+const SUPPORTED_BACKGROUND_FILE_ACCEPT = '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
 
 const serializeMotion = (motion) => ({
   id: motion.id,
@@ -103,6 +106,32 @@ function parseDataUrlMimeType(dataUrl) {
 
   const match = /^data:([^;,]+)[;,]/i.exec(dataUrl);
   return match?.[1] || 'image/png';
+}
+
+function getFileExtension(filename) {
+  if (typeof filename !== 'string') {
+    return '';
+  }
+  const trimmed = filename.trim();
+  const dot = trimmed.lastIndexOf('.');
+  if (dot <= 0 || dot >= trimmed.length - 1) {
+    return '';
+  }
+  return trimmed.slice(dot + 1).toLowerCase();
+}
+
+function isSupportedBackgroundFile(file) {
+  if (!file) {
+    return false;
+  }
+
+  const mimeType = typeof file.type === 'string' ? file.type.trim().toLowerCase() : '';
+  if (mimeType && SUPPORTED_BACKGROUND_MIME_TYPES.has(mimeType)) {
+    return true;
+  }
+
+  const extension = getFileExtension(file.name);
+  return Boolean(extension && SUPPORTED_BACKGROUND_EXTENSIONS.has(extension));
 }
 
 function makeNewMotionId(motions) {
@@ -319,6 +348,7 @@ export default function Live2DControls({
   const [backgroundOpacity, setBackgroundOpacity] = useState(1);
   const [hasBackground, setHasBackground] = useState(false);
   const [cachedBackgrounds, setCachedBackgrounds] = useState([]);
+  const [backgroundUploadError, setBackgroundUploadError] = useState('');
 
   const [isHydrated, setIsHydrated] = useState(false);
 
@@ -1208,20 +1238,27 @@ export default function Live2DControls({
   const uploadBackground = useCallback(
     async (file) => {
       if (!file) return;
-      if (!file.type.startsWith('image/')) {
-        updateDebugInfo('错误: 请选择图片文件');
+      if (!isSupportedBackgroundFile(file)) {
+        const message = t('background.unsupportedFormat');
+        setBackgroundUploadError(message);
+        updateDebugInfo(`错误: ${message}`);
         return;
       }
 
       const manager = getManager();
       if (!manager || !manager.isInitialized) {
-        updateDebugInfo('错误: Live2D 管理器未初始化');
+        const message = '错误: Live2D 管理器未初始化';
+        setBackgroundUploadError(message);
+        updateDebugInfo(message);
         return;
       }
 
+      setBackgroundUploadError('');
       const success = await manager.loadBackgroundImage(file);
       if (!success) {
-        updateDebugInfo('背景图片上传失败');
+        const message = t('background.uploadFailed');
+        setBackgroundUploadError(message);
+        updateDebugInfo(message);
         return;
       }
 
@@ -1231,7 +1268,7 @@ export default function Live2DControls({
       await addToCache(file);
       updateDebugInfo(`背景图片上传成功: ${file.name}`);
     },
-    [addToCache, backgroundOpacity, getManager, onBackgroundChange, updateDebugInfo],
+    [addToCache, backgroundOpacity, getManager, onBackgroundChange, t, updateDebugInfo],
   );
 
   const selectCachedBackground = useCallback(
@@ -1287,6 +1324,7 @@ export default function Live2DControls({
     getManager()?.clearBackground();
     setHasBackground(false);
     setBackgroundImage(null);
+    setBackgroundUploadError('');
     onBackgroundChange?.({ image: null, opacity: backgroundOpacity, hasBackground: false });
     updateDebugInfo('背景已清除');
   }, [backgroundOpacity, getManager, onBackgroundChange, updateDebugInfo]);
@@ -1483,6 +1521,8 @@ export default function Live2DControls({
           hasBackground={hasBackground}
           backgroundOpacity={backgroundOpacity}
           cachedBackgrounds={cachedBackgrounds}
+          acceptedFileTypes={SUPPORTED_BACKGROUND_FILE_ACCEPT}
+          backgroundUploadError={backgroundUploadError}
           onUploadBackground={uploadBackground}
           onUpdateBackgroundOpacity={updateBackgroundOpacity}
           onClearBackground={clearBackground}
