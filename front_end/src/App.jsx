@@ -156,6 +156,8 @@ function AppContent({ desktopMode }) {
     onOpenClawSettingChange,
     onNanobotSettingChange,
     onPickNanobotWorkspace,
+    onSetNanobotWorkspaceFromPath,
+    onOpenNanobotWorkspace,
     onTestChatBackendSettings,
     onClearSavedToken,
     nanobotRuntimeStatus,
@@ -751,6 +753,9 @@ function AppContent({ desktopMode }) {
           onQuickCapture={triggerPetQuickCapture}
           captureDraft={pendingCaptureDraft}
           onClearCaptureDraft={clearPendingCaptureDraft}
+          nanobotWorkspace={chatBackendSettings?.nanobot?.workspace || ''}
+          onDropNanobotWorkspacePath={onSetNanobotWorkspaceFromPath}
+          onOpenNanobotWorkspace={onOpenNanobotWorkspace}
           showVoicePermissionWarning={showVoicePermissionWarning}
           voicePermissionWarningText={voicePermissionWarningText}
         />

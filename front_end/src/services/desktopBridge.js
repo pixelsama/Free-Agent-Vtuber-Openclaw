@@ -766,6 +766,48 @@ export const desktopBridge = {
         path: '',
       };
     },
+    async setNanobotWorkspace(pathname = '') {
+      const normalizedPath = typeof pathname === 'string' ? pathname.trim() : '';
+      if (!normalizedPath) {
+        return {
+          ok: false,
+          error: {
+            code: 'nanobot_workspace_empty_path',
+            message: '工作区路径不能为空。',
+          },
+        };
+      }
+
+      const api = getDesktopApi();
+      if (api?.settings?.setNanobotWorkspace) {
+        return api.settings.setNanobotWorkspace({ path: normalizedPath });
+      }
+
+      const saved = await saveWebSettings({
+        nanobot: {
+          workspace: normalizedPath,
+        },
+      });
+      return {
+        ok: true,
+        path: normalizedPath,
+        settings: saved,
+      };
+    },
+    async openNanobotWorkspace() {
+      const api = getDesktopApi();
+      if (api?.settings?.openNanobotWorkspace) {
+        return api.settings.openNanobotWorkspace();
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: 'desktop_nanobot_workspace_unavailable',
+          message: '当前环境不支持打开 Nanobot 工作区。',
+        },
+      };
+    },
   },
   appUpdater: {
     async getState() {

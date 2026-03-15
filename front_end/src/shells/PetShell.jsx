@@ -8,6 +8,7 @@ import MicIcon from '@mui/icons-material/Mic';
 import MicOffIcon from '@mui/icons-material/MicOff';
 import ContentCutIcon from '@mui/icons-material/ContentCut';
 import CloseIcon from '@mui/icons-material/Close';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import Live2DViewer from '../components/live2d/Live2DViewer.jsx';
 import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import { usePetDraggable } from '../hooks/pet/usePetDraggable.js';
@@ -49,6 +50,105 @@ function persistModelScale(scale) {
   }
 }
 
+function hasExternalPathPayload(dataTransfer) {
+  if (!dataTransfer) {
+    return false;
+  }
+
+  if (Number(dataTransfer.files?.length || 0) > 0) {
+    return true;
+  }
+
+  const types = Array.from(dataTransfer.types || []);
+  return (
+    types.includes('Files')
+    || types.includes('text/uri-list')
+    || types.includes('public.file-url')
+    || types.includes('text/plain')
+  );
+}
+
+function parseFileUrlToPath(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(value.trim());
+    if (parsed.protocol !== 'file:') {
+      return '';
+    }
+    let pathname = decodeURIComponent(parsed.pathname || '');
+    if (!pathname) {
+      return '';
+    }
+    if (/^\/[A-Za-z]:\//.test(pathname)) {
+      pathname = pathname.slice(1);
+    }
+    return pathname.trim();
+  } catch {
+    return '';
+  }
+}
+
+function parsePathLikeText(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.startsWith('/') || /^[A-Za-z]:[\\/]/.test(normalized)) {
+    return normalized;
+  }
+  return '';
+}
+
+function collectDroppedPaths(dataTransfer) {
+  if (!dataTransfer) {
+    return [];
+  }
+
+  const paths = new Set();
+  const appendPath = (value) => {
+    if (typeof value !== 'string') {
+      return;
+    }
+    const normalized = value.trim();
+    if (normalized) {
+      paths.add(normalized);
+    }
+  };
+
+  const files = Array.from(dataTransfer.files || []);
+  for (const file of files) {
+    appendPath(file?.path);
+  }
+
+  const items = Array.from(dataTransfer.items || []);
+  for (const item of items) {
+    const file = item?.getAsFile?.();
+    appendPath(file?.path);
+  }
+
+  const uriListText = dataTransfer.getData?.('text/uri-list') || '';
+  if (uriListText) {
+    const uriLines = uriListText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'));
+    for (const uri of uriLines) {
+      appendPath(parseFileUrlToPath(uri) || parsePathLikeText(uri));
+    }
+  }
+
+  const plainText = dataTransfer.getData?.('text/plain') || '';
+  appendPath(parseFileUrlToPath(plainText) || parsePathLikeText(plainText));
+
+  return Array.from(paths);
+}
+
 export default function PetShell({
   desktopMode,
   platform,
@@ -69,6 +169,9 @@ export default function PetShell({
   onQuickCapture,
   captureDraft = null,
   onClearCaptureDraft,
+  nanobotWorkspace = '',
+  onDropNanobotWorkspacePath,
+  onOpenNanobotWorkspace,
   showVoicePermissionWarning = false,
   voicePermissionWarningText = '',
 }) {
@@ -76,9 +179,12 @@ export default function PetShell({
   const modelHoverRef = useRef(false);
   const hitboxRef = useRef(null);
   const controlsRef = useRef(null);
+  const workspaceDragDepthRef = useRef(0);
   const [isActivationRectHovering, setIsActivationRectHovering] = useState(false);
   const [isModelHovering, setIsModelHovering] = useState(false);
   const [isControlsHovering, setIsControlsHovering] = useState(false);
+  const [isWorkspaceHovering, setIsWorkspaceHovering] = useState(false);
+  const [isWorkspaceDropActive, setIsWorkspaceDropActive] = useState(false);
   const [isModelLocked, setIsModelLocked] = useState(false);
   const {
     voiceEnabled = false,
@@ -230,19 +336,91 @@ export default function PetShell({
       setPetHover?.('live2d-hitbox', false);
       setPetHover?.('pet-dragging', false);
       setPetHover?.('pet-bottom-controls', false);
+      setPetHover?.('pet-workspace-indicator', false);
     },
     [setPetHover],
   );
+
+  const handleWorkspaceDragEnter = useCallback((event) => {
+    if (!desktopMode || !hasExternalPathPayload(event?.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    workspaceDragDepthRef.current += 1;
+    setIsWorkspaceDropActive(true);
+    setPetHover?.('pet-workspace-indicator', true);
+  }, [desktopMode, setPetHover]);
+
+  const handleWorkspaceDragOver = useCallback((event) => {
+    if (!desktopMode || !hasExternalPathPayload(event?.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    if (!isWorkspaceDropActive) {
+      setIsWorkspaceDropActive(true);
+    }
+    setPetHover?.('pet-workspace-indicator', true);
+  }, [desktopMode, isWorkspaceDropActive, setPetHover]);
+
+  const handleWorkspaceDragLeave = useCallback((event) => {
+    if (!desktopMode || !isWorkspaceDropActive) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    workspaceDragDepthRef.current = Math.max(0, workspaceDragDepthRef.current - 1);
+    if (workspaceDragDepthRef.current === 0) {
+      setIsWorkspaceDropActive(false);
+      setPetHover?.('pet-workspace-indicator', false);
+    }
+  }, [desktopMode, isWorkspaceDropActive, setPetHover]);
+
+  const handleWorkspaceDrop = useCallback(async (event) => {
+    if (!desktopMode) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    workspaceDragDepthRef.current = 0;
+    setIsWorkspaceDropActive(false);
+    setPetHover?.('pet-workspace-indicator', false);
+
+    const droppedPaths = collectDroppedPaths(event?.dataTransfer);
+    if (!droppedPaths.length) {
+      return;
+    }
+
+    const [firstPath] = droppedPaths;
+    if (!firstPath || typeof onDropNanobotWorkspacePath !== 'function') {
+      return;
+    }
+
+    await onDropNanobotWorkspacePath(firstPath);
+  }, [desktopMode, onDropNanobotWorkspacePath, setPetHover]);
 
   const controlsVisible =
     isActivationRectHovering
     || isModelHovering
     || isDragging
     || isControlsHovering
+    || isWorkspaceHovering
+    || isWorkspaceDropActive
     || showChatPanel
     || voiceEnabled;
   const controlsHoverBindings = bindPetHover?.('pet-bottom-controls') ?? {};
   const captureHoverBindings = bindPetHover?.('pet-capture-preview') ?? {};
+  const workspaceHoverBindings = bindPetHover?.('pet-workspace-indicator') ?? {};
+  const normalizedWorkspacePath = typeof nanobotWorkspace === 'string' ? nanobotWorkspace.trim() : '';
+  const hasWorkspacePath = Boolean(normalizedWorkspacePath);
 
   const stageClassName = ['live2d-stage', 'pet-mode', desktopMode ? `platform-${platform}` : '']
     .filter(Boolean)
@@ -279,6 +457,12 @@ export default function PetShell({
           if (!isDragging) {
             setModelHover(false);
           }
+        }}
+        onDragEnter={handleWorkspaceDragEnter}
+        onDragOver={handleWorkspaceDragOver}
+        onDragLeave={handleWorkspaceDragLeave}
+        onDrop={(event) => {
+          void handleWorkspaceDrop(event);
         }}
         {...dragBindings}
       >
@@ -414,6 +598,54 @@ export default function PetShell({
             </IconButton>
           </Box>
         )}
+        {controlsVisible ? (
+          <Box
+            className={[
+              'pet-workspace-indicator',
+              isWorkspaceDropActive ? 'is-drop-active' : '',
+              showVoicePermissionWarning && voicePermissionWarningText ? 'has-voice-warning' : '',
+              hasWorkspacePath ? '' : 'is-disabled',
+            ].filter(Boolean).join(' ')}
+            onMouseEnter={(event) => {
+              setIsWorkspaceHovering(true);
+              workspaceHoverBindings.onMouseEnter?.(event);
+            }}
+            onMouseLeave={(event) => {
+              setIsWorkspaceHovering(false);
+              workspaceHoverBindings.onMouseLeave?.(event);
+            }}
+            onPointerDownCapture={(event) => {
+              event.stopPropagation();
+            }}
+            onClick={() => {
+              if (hasWorkspacePath) {
+                void onOpenNanobotWorkspace?.();
+              }
+            }}
+            title={hasWorkspacePath ? normalizedWorkspacePath : t('pet.nanobotWorkspaceUnset')}
+            role="button"
+            aria-label={t('pet.nanobotWorkspaceOpen')}
+            aria-disabled={!hasWorkspacePath}
+            tabIndex={hasWorkspacePath ? 0 : -1}
+            onKeyDown={(event) => {
+              if (!hasWorkspacePath) {
+                return;
+              }
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                void onOpenNanobotWorkspace?.();
+              }
+            }}
+          >
+            <FolderOpenIcon fontSize="small" />
+            <Box className="pet-workspace-indicator-meta">
+              <Box className="pet-workspace-indicator-label">{t('app.nanobotWorkspace')}</Box>
+              <Box className={`pet-workspace-indicator-path ${hasWorkspacePath ? '' : 'is-empty'}`.trim()}>
+                {hasWorkspacePath ? normalizedWorkspacePath : t('pet.nanobotWorkspaceUnset')}
+              </Box>
+            </Box>
+          </Box>
+        ) : null}
         {showVoicePermissionWarning && voicePermissionWarningText ? (
           <Box className="pet-voice-warning">{voicePermissionWarningText}</Box>
         ) : null}

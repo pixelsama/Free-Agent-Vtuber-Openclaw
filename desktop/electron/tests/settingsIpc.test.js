@@ -1,4 +1,7 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const { registerSettingsIpc } = require('../ipc/settings');
@@ -16,6 +19,9 @@ function createIpcMainMock() {
         throw new Error(`Missing handler for ${channel}`);
       }
       return handler({}, payload);
+    },
+    removeHandler(channel) {
+      handlers.delete(channel);
     },
   };
 }
@@ -143,4 +149,74 @@ test('settings:nanobot:pick-workspace returns selected directory path', async ()
   const result = await ipcMain.invoke('settings:nanobot:pick-workspace');
   assert.equal(result.ok, true);
   assert.equal(result.path, '/tmp/selected-workspace');
+});
+
+test('settings:nanobot:set-workspace validates directory and saves settings', async () => {
+  const ipcMain = createIpcMainMock();
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'settings-ipc-'));
+  const workspaceDir = path.join(rootDir, 'workspace');
+  await fs.mkdir(workspaceDir, { recursive: true });
+
+  let savedPayload = null;
+  registerSettingsIpc({
+    ipcMain,
+    settingsStore: {
+      getPublic: () => ({ nanobot: { workspace: '' } }),
+      save: async (payload) => {
+        savedPayload = payload;
+        return {
+          nanobot: {
+            workspace: payload?.nanobot?.workspace || '',
+          },
+        };
+      },
+    },
+    backendManager: {
+      resolveBackendName: () => 'nanobot',
+      testConnection: async () => ({ ok: true }),
+      mapError: (error) => ({ code: 'mapped_error', message: error?.message || 'error' }),
+    },
+  });
+
+  const result = await ipcMain.invoke('settings:nanobot:set-workspace', {
+    path: workspaceDir,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.path, await fs.realpath(workspaceDir));
+  assert.equal(savedPayload.nanobot.workspace, await fs.realpath(workspaceDir));
+});
+
+test('settings:nanobot:open-workspace creates folder and delegates to shell', async () => {
+  const ipcMain = createIpcMainMock();
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'settings-ipc-open-'));
+  const workspaceDir = path.join(rootDir, 'nanobot-workspace');
+  let openedPath = '';
+
+  registerSettingsIpc({
+    ipcMain,
+    settingsStore: {
+      getPublic: () => ({
+        nanobot: {
+          workspace: workspaceDir,
+        },
+      }),
+      save: async (payload) => payload,
+    },
+    backendManager: {
+      resolveBackendName: () => 'nanobot',
+      testConnection: async () => ({ ok: true }),
+      mapError: (error) => ({ code: 'mapped_error', message: error?.message || 'error' }),
+    },
+    shellModule: {
+      openPath: async (targetPath) => {
+        openedPath = targetPath;
+        return '';
+      },
+    },
+  });
+
+  const result = await ipcMain.invoke('settings:nanobot:open-workspace');
+  assert.equal(result.ok, true);
+  assert.equal(openedPath, await fs.realpath(workspaceDir));
 });
