@@ -14,10 +14,8 @@ import SubtitleBar from '../components/subtitle/SubtitleBar.jsx';
 import { usePetDraggable } from '../hooks/pet/usePetDraggable.js';
 import { useI18n } from '../i18n/I18nContext.jsx';
 import { STORAGE_KEYS } from '../components/controls/constants.js';
-import { desktopBridge } from '../services/desktopBridge.js';
 
 const PET_DEFAULT_MODEL_SCALE = 0.31;
-const PET_POINTER_SYNC_INTERVAL_MS = 50;
 
 function normalizeModelScale(scale) {
   const rounded = Math.round(scale * 100) / 100;
@@ -339,67 +337,9 @@ export default function PetShell({
       setPetHover?.('pet-dragging', false);
       setPetHover?.('pet-bottom-controls', false);
       setPetHover?.('pet-workspace-indicator', false);
-      setPetHover?.('pet-drop-proximity', false);
     },
     [setPetHover],
   );
-
-  useEffect(() => {
-    if (!desktopMode || typeof setPetHover !== 'function') {
-      return undefined;
-    }
-
-    let disposed = false;
-    let timerId = null;
-
-    const pollCursorProximity = async () => {
-      try {
-        const context = await desktopBridge.window.getCursorContext();
-        if (disposed) {
-          return;
-        }
-        if (!context?.ok || context?.mode !== 'pet') {
-          setPetHover('pet-drop-proximity', false);
-          return;
-        }
-
-        const hitboxRect = hitboxRef.current?.getBoundingClientRect?.();
-        const desktopBounds = context.desktopBounds;
-        const cursor = context.cursor;
-        if (!hitboxRect || !desktopBounds || !cursor) {
-          setPetHover('pet-drop-proximity', false);
-          return;
-        }
-
-        const clientX = cursor.x - desktopBounds.x;
-        const clientY = cursor.y - desktopBounds.y;
-        const isInHitbox =
-          clientX >= hitboxRect.left
-          && clientX <= hitboxRect.right
-          && clientY >= hitboxRect.top
-          && clientY <= hitboxRect.bottom;
-        setPetHover('pet-drop-proximity', isInHitbox);
-      } catch {
-        setPetHover('pet-drop-proximity', false);
-      } finally {
-        if (!disposed) {
-          timerId = window.setTimeout(() => {
-            void pollCursorProximity();
-          }, PET_POINTER_SYNC_INTERVAL_MS);
-        }
-      }
-    };
-
-    void pollCursorProximity();
-
-    return () => {
-      disposed = true;
-      if (timerId) {
-        window.clearTimeout(timerId);
-      }
-      setPetHover('pet-drop-proximity', false);
-    };
-  }, [desktopMode, setPetHover]);
 
   const handleWorkspaceDragEnter = useCallback((event) => {
     if (!desktopMode || !hasExternalPathPayload(event?.dataTransfer)) {
